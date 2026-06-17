@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "foodchoice",
+    "slug": "foodchoice",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "foodchoice",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.foodchoice.app",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "foodchoice utilise votre position pour trouver des restaurants proches."
+      }
+    },
+    "android": {
+      "package": "com.foodchoice.app",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
