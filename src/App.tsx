@@ -1,11 +1,14 @@
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  GestureResponderEvent,
   Image,
+  LayoutChangeEvent,
   Linking,
+  PanResponder,
   Platform,
   Pressable,
   SafeAreaView,
@@ -28,6 +31,7 @@ import {
   LocateFixed,
   MapPin,
   Navigation,
+  Phone,
   Search,
   Share2,
   ShieldCheck,
@@ -59,17 +63,26 @@ import {
 const provider = new MockRestaurantProvider();
 
 const cuisineOptions = [
-  "Française",
-  "Italienne",
-  "Japonaise",
-  "Indienne",
-  "Libanaise",
-  "Mexicaine",
-  "Méditerranéenne",
-  "Vegan",
-  "Pizza",
-  "Sushi",
-  "Burgers"
+  "française",
+  "italienne",
+  "japonaise",
+  "chinoise",
+  "coréenne",
+  "thaïlandaise",
+  "indienne",
+  "libanaise",
+  "mexicaine",
+  "américaine",
+  "africaine",
+  "méditerranéenne",
+  "végétarienne",
+  "vegan",
+  "burgers",
+  "pizza",
+  "sushi",
+  "fruits de mer",
+  "barbecue",
+  "desserts"
 ];
 
 const dietaryOptions: DietaryKey[] = [
@@ -92,7 +105,7 @@ const contextOptions: MealContext[] = [
 ];
 
 const defaultCriteria: SearchCriteria = {
-  locationLabel: "Paris, centre",
+  locationLabel: "",
   context: "friends",
   budget: 2,
   cuisines: ["Méditerranéenne"],
@@ -119,8 +132,12 @@ export default function App() {
   async function runSearch(mode: DecisionMode = decisionMode) {
     setLoading(true);
     try {
-      const restaurants = await provider.search(criteria);
-      const ranked = rankRestaurants(restaurants, criteria);
+      const resolvedCriteria = await resolveCriteriaLocation(criteria);
+      if (!resolvedCriteria) return;
+
+      const restaurants = await provider.search(resolvedCriteria);
+      const ranked = rankRestaurants(restaurants, resolvedCriteria);
+      setCriteria(resolvedCriteria);
       setResults(ranked);
       setDecisionMode(mode);
       setScreen("results");
@@ -129,7 +146,14 @@ export default function App() {
     }
   }
 
-  async function useCurrentLocation() {
+  async function resolveCriteriaLocation(
+    baseCriteria: SearchCriteria,
+    forceCurrentLocation = false
+  ): Promise<SearchCriteria | null> {
+    if (!forceCurrentLocation && baseCriteria.locationLabel.trim().length > 0) {
+      return baseCriteria;
+    }
+
     setLocating(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -138,26 +162,32 @@ export default function App() {
           "Localisation refusée",
           "Vous pouvez quand même saisir une adresse ou un quartier."
         );
-        return;
+        return null;
       }
 
       const location = await Location.getCurrentPositionAsync({});
-      setCriteria((current) => ({
-        ...current,
+      return {
+        ...baseCriteria,
         locationLabel: "Position actuelle",
         coordinates: {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude
         }
-      }));
+      };
     } catch {
       Alert.alert(
         "Position indisponible",
         "La recherche par adresse reste disponible."
       );
+      return null;
     } finally {
       setLocating(false);
     }
+  }
+
+  async function useCurrentLocation() {
+    const resolvedCriteria = await resolveCriteriaLocation(criteria, true);
+    if (resolvedCriteria) setCriteria(resolvedCriteria);
   }
 
   function toggleCuisine(cuisine: string) {
@@ -402,62 +432,28 @@ function SearchScreen({
             thumbColor={colors.surface}
           />
         </View>
-        <View style={styles.filterRow}>
-          <View style={styles.iconLabel}>
-            <Star size={18} color={colors.gold} fill={colors.gold} />
-            <Text style={styles.filterLabel}>Note minimale</Text>
-          </View>
-          <View style={styles.stepper}>
-            {[3.5, 4, 4.5].map((rating) => (
-              <Pressable
-                key={rating}
-                style={[
-                  styles.smallStep,
-                  criteria.minRating === rating && styles.smallStepActive
-                ]}
-                onPress={() => onCriteriaChange({ ...criteria, minRating: rating })}
-              >
-                <Text
-                  style={[
-                    styles.smallStepText,
-                    criteria.minRating === rating && styles.smallStepTextActive
-                  ]}
-                >
-                  {rating.toFixed(1)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-        <View style={styles.filterRow}>
-          <View style={styles.iconLabel}>
-            <MapPin size={18} color={colors.coral} />
-            <Text style={styles.filterLabel}>Distance max.</Text>
-          </View>
-          <View style={styles.stepper}>
-            {[2, 5, 10].map((distance) => (
-              <Pressable
-                key={distance}
-                style={[
-                  styles.smallStep,
-                  criteria.maxDistanceKm === distance && styles.smallStepActive
-                ]}
-                onPress={() =>
-                  onCriteriaChange({ ...criteria, maxDistanceKm: distance })
-                }
-              >
-                <Text
-                  style={[
-                    styles.smallStepText,
-                    criteria.maxDistanceKm === distance && styles.smallStepTextActive
-                  ]}
-                >
-                  {distance} km
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
+        <NumberSliderField
+          icon={<Star size={18} color={colors.gold} fill={colors.gold} />}
+          label="Note minimale"
+          value={criteria.minRating}
+          min={1}
+          max={5}
+          step={0.1}
+          suffix="/5"
+          onChange={(minRating) => onCriteriaChange({ ...criteria, minRating })}
+        />
+        <NumberSliderField
+          icon={<MapPin size={18} color={colors.coral} />}
+          label="Distance max."
+          value={criteria.maxDistanceKm}
+          min={1}
+          max={10}
+          step={0.1}
+          suffix=" km"
+          onChange={(maxDistanceKm) =>
+            onCriteriaChange({ ...criteria, maxDistanceKm })
+          }
+        />
       </View>
 
       <View style={styles.actionRow}>
@@ -567,6 +563,38 @@ function DetailScreen({
     ([, status]) => status === "unknown"
   ) as [DietaryKey, string][];
 
+  async function callRestaurant(phoneNumber: string) {
+    const callUrl = `tel:${phoneNumber.replace(/[^\d+]/g, "")}`;
+    const supported = await Linking.canOpenURL(callUrl);
+
+    if (!supported) {
+      Alert.alert(
+        "Appel indisponible",
+        "Votre appareil ne peut pas lancer d'appel depuis ce numéro."
+      );
+      return;
+    }
+
+    await Linking.openURL(callUrl);
+  }
+
+  async function openWebsite(websiteUrl: string) {
+    const normalizedUrl = websiteUrl.startsWith("http")
+      ? websiteUrl
+      : `https://${websiteUrl}`;
+    const supported = await Linking.canOpenURL(normalizedUrl);
+
+    if (!supported) {
+      Alert.alert(
+        "Lien indisponible",
+        "Impossible d'ouvrir ce site depuis votre appareil."
+      );
+      return;
+    }
+
+    await Linking.openURL(normalizedUrl);
+  }
+
   return (
     <View style={styles.flex}>
       <Header title={restaurant.name} subtitle={restaurant.address} onBack={onBack} />
@@ -614,8 +642,23 @@ function DetailScreen({
         <View style={styles.detailBlock}>
           <Text style={styles.detailTitle}>Contact</Text>
           <Text style={styles.detailText}>{restaurant.address}</Text>
-          {restaurant.phone && <Text style={styles.detailText}>{restaurant.phone}</Text>}
-          {restaurant.website && <Text style={styles.linkText}>{restaurant.website}</Text>}
+          {restaurant.phone && (
+            <Pressable
+              style={styles.phoneLink}
+              onPress={() => callRestaurant(restaurant.phone!)}
+            >
+              <Phone size={17} color={colors.blue} />
+              <Text style={styles.phoneLinkText}>{restaurant.phone}</Text>
+            </Pressable>
+          )}
+          {restaurant.website && (
+            <Pressable
+              style={styles.websiteLink}
+              onPress={() => openWebsite(restaurant.website!)}
+            >
+              <Text style={styles.linkText}>{restaurant.website}</Text>
+            </Pressable>
+          )}
         </View>
       </ScrollView>
 
@@ -711,6 +754,137 @@ function Chip({
     <Pressable style={[styles.chip, active && styles.chipActive]} onPress={onPress}>
       <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
     </Pressable>
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function roundToStep(value: number, step: number) {
+  return Math.round(value / step) * step;
+}
+
+function formatDecimal(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
+function NumberSliderField({
+  icon,
+  label,
+  value,
+  min,
+  max,
+  step,
+  suffix,
+  onChange
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  suffix: string;
+  onChange: (value: number) => void;
+}) {
+  const [trackWidth, setTrackWidth] = useState(1);
+  const [draftValue, setDraftValue] = useState(formatDecimal(value));
+  const dragStartValue = useRef(value);
+  const percent = ((value - min) / (max - min)) * 100;
+
+  useEffect(() => {
+    setDraftValue(formatDecimal(value));
+  }, [value]);
+
+  function commitValue(rawValue: string) {
+    const parsed = Number(rawValue.replace(",", "."));
+    if (!Number.isFinite(parsed)) {
+      setDraftValue(formatDecimal(value));
+      return;
+    }
+
+    const nextValue = roundToStep(clamp(parsed, min, max), step);
+    onChange(Number(nextValue.toFixed(1)));
+  }
+
+  function normalizeValue(rawValue: number) {
+    return Number(roundToStep(clamp(rawValue, min, max), step).toFixed(1));
+  }
+
+  function valueFromPosition(event: GestureResponderEvent) {
+    const x = clamp(event.nativeEvent.locationX, 0, trackWidth);
+    return normalizeValue(min + (x / trackWidth) * (max - min));
+  }
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: (event) => {
+          const nextValue = valueFromPosition(event);
+          dragStartValue.current = nextValue;
+          onChange(nextValue);
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const deltaValue = (gestureState.dx / trackWidth) * (max - min);
+          onChange(normalizeValue(dragStartValue.current + deltaValue));
+        }
+      }),
+    [trackWidth, min, max, step, onChange]
+  );
+
+  return (
+    <View style={styles.numberField}>
+      <View style={styles.numberFieldHeader}>
+        <View style={styles.iconLabel}>
+          {icon}
+          <Text style={styles.filterLabel}>{label}</Text>
+        </View>
+        <View style={styles.numberInputWrap}>
+          <TextInput
+            value={draftValue}
+            onChangeText={(text) => {
+              setDraftValue(text);
+              if (text.trim().length > 0) commitValue(text);
+            }}
+            onBlur={() => commitValue(draftValue)}
+            onSubmitEditing={() => commitValue(draftValue)}
+            keyboardType="decimal-pad"
+            inputMode="decimal"
+            style={styles.numberInput}
+          />
+          <Text style={styles.numberSuffix}>{suffix}</Text>
+        </View>
+      </View>
+      <View
+        style={styles.sliderTrack}
+        onLayout={(event: LayoutChangeEvent) =>
+          setTrackWidth(Math.max(1, event.nativeEvent.layout.width))
+        }
+        {...panResponder.panHandlers}
+      >
+        <View style={styles.sliderBase} />
+        <View style={[styles.sliderFill, { width: `${clamp(percent, 0, 100)}%` }]} />
+        <View
+          style={[
+            styles.sliderThumb,
+            { left: `${clamp(percent, 0, 100)}%` }
+          ]}
+        />
+      </View>
+      <View style={styles.sliderBounds}>
+        <Text style={styles.sliderBoundText}>
+          {formatDecimal(min)}
+          {suffix}
+        </Text>
+        <Text style={styles.sliderBoundText}>
+          {formatDecimal(max)}
+          {suffix}
+        </Text>
+      </View>
+    </View>
   );
 }
 
@@ -959,6 +1133,80 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12
+  },
+  numberField: {
+    gap: 10
+  },
+  numberFieldHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  numberInputWrap: {
+    minWidth: 86,
+    height: 40,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.background,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10
+  },
+  numberInput: {
+    minWidth: 34,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900",
+    textAlign: "right",
+    padding: 0
+  },
+  numberSuffix: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800",
+    marginLeft: 3
+  },
+  sliderTrack: {
+    height: 28,
+    justifyContent: "center"
+  },
+  sliderBase: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.line
+  },
+  sliderFill: {
+    position: "absolute",
+    left: 0,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.brand
+  },
+  sliderThumb: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    marginLeft: -12,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderWidth: 3,
+    borderColor: colors.brand,
+    ...shadow
+  },
+  sliderBounds: {
+    flexDirection: "row",
+    justifyContent: "space-between"
+  },
+  sliderBoundText: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700"
   },
   iconLabel: {
     flexDirection: "row",
@@ -1270,7 +1518,24 @@ const styles = StyleSheet.create({
   linkText: {
     color: colors.blue,
     fontSize: 15,
-    fontWeight: "800"
+    fontWeight: "800",
+    textDecorationLine: "underline"
+  },
+  websiteLink: {
+    alignSelf: "flex-start",
+    paddingVertical: 6
+  },
+  phoneLink: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingVertical: 6
+  },
+  phoneLinkText: {
+    color: colors.blue,
+    fontSize: 15,
+    fontWeight: "900"
   },
   dietGrid: {
     flexDirection: "row",
