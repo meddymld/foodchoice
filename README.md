@@ -15,3 +15,10 @@ L'application doit permettre de choisir un restaurant sans perdre de temps, que 
 
 - [Cadrage produit et MVP](docs/product-requirements.md)
 - [Prochaines décisions](docs/next-decisions.md)
+
+## Lancement de l'app en local
+
+npm run web
+
+## Pour du local
+npx expo start --clear
