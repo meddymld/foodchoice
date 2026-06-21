@@ -22,13 +22,16 @@ import {
 } from "react-native";
 import {
   ArrowLeft,
+  Bookmark,
   CarFront,
   Check,
   ChevronRight,
   Clock3,
   Compass,
   Heart,
+  ListFilter,
   LocateFixed,
+  Map,
   MapPin,
   Navigation,
   Phone,
@@ -38,6 +41,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  UserCog,
   UserRound
 } from "lucide-react-native";
 
@@ -117,17 +121,33 @@ const defaultCriteria: SearchCriteria = {
 
 type Screen = "search" | "results" | "detail" | "route";
 type DecisionMode = "list" | "pick";
+type MainTab = "search" | "map" | "favorites" | "profile";
+type FavoriteSort = "distance" | "criteria";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("search");
+  const [activeTab, setActiveTab] = useState<MainTab>("search");
   const [criteria, setCriteria] = useState<SearchCriteria>(defaultCriteria);
   const [results, setResults] = useState<ScoredRestaurant[]>([]);
   const [selected, setSelected] = useState<ScoredRestaurant | null>(null);
+  const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
+  const [favoriteSort, setFavoriteSort] = useState<FavoriteSort>("criteria");
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("list");
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
 
   const topPick = useMemo(() => results[0], [results]);
+  const favorites = useMemo(
+    () =>
+      results
+        .filter((restaurant) => favoriteIds.includes(restaurant.id))
+        .sort((a, b) =>
+          favoriteSort === "distance"
+            ? a.distanceKm - b.distanceKm
+            : b.score - a.score
+        ),
+    [favoriteIds, favoriteSort, results]
+  );
 
   async function runSearch(mode: DecisionMode = decisionMode) {
     setLoading(true);
@@ -213,6 +233,14 @@ export default function App() {
     setScreen("detail");
   }
 
+  function toggleFavorite(restaurantId: string) {
+    setFavoriteIds((current) =>
+      current.includes(restaurantId)
+        ? current.filter((id) => id !== restaurantId)
+        : [...current, restaurantId]
+    );
+  }
+
   async function openRoute(app: NavigationApp) {
     if (!selected) return;
 
@@ -246,37 +274,88 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
-      {screen === "search" && (
-        <SearchScreen
-          criteria={criteria}
-          locating={locating}
-          loading={loading}
-          onCriteriaChange={setCriteria}
-          onUseLocation={useCurrentLocation}
-          onToggleCuisine={toggleCuisine}
-          onToggleDiet={toggleDiet}
-          onSearch={() => runSearch("list")}
-          onPick={() => runSearch("pick")}
-        />
-      )}
+      {screen !== "detail" && screen !== "route" && (
+        <View style={styles.tabShell}>
+          <View style={styles.tabContent}>
+            {activeTab === "search" && screen === "search" && (
+              <SearchScreen
+                criteria={criteria}
+                locating={locating}
+                loading={loading}
+                onCriteriaChange={setCriteria}
+                onUseLocation={useCurrentLocation}
+                onToggleCuisine={toggleCuisine}
+                onToggleDiet={toggleDiet}
+                onSearch={() => runSearch("list")}
+                onPick={() => runSearch("pick")}
+              />
+            )}
 
-      {screen === "results" && (
-        <ResultsScreen
-          criteria={criteria}
-          results={results}
-          topPick={topPick}
-          decisionMode={decisionMode}
-          onDecisionModeChange={setDecisionMode}
-          onBack={() => setScreen("search")}
-          onOpenDetail={openDetail}
-        />
+            {activeTab === "search" && screen === "results" && (
+              <ResultsScreen
+                criteria={criteria}
+                results={results}
+                topPick={topPick}
+                decisionMode={decisionMode}
+                favoriteIds={favoriteIds}
+                onDecisionModeChange={setDecisionMode}
+                onBack={() => setScreen("search")}
+                onOpenDetail={openDetail}
+                onToggleFavorite={toggleFavorite}
+              />
+            )}
+
+            {activeTab === "map" && (
+              <MapScreen
+                criteria={criteria}
+                results={results}
+                favoriteIds={favoriteIds}
+                onOpenDetail={openDetail}
+                onToggleFavorite={toggleFavorite}
+                onGoSearch={() => {
+                  setActiveTab("search");
+                  setScreen("search");
+                }}
+              />
+            )}
+
+            {activeTab === "favorites" && (
+              <FavoritesScreen
+                favorites={favorites}
+                favoriteSort={favoriteSort}
+                onFavoriteSortChange={setFavoriteSort}
+                onOpenDetail={openDetail}
+                onToggleFavorite={toggleFavorite}
+                onGoSearch={() => {
+                  setActiveTab("search");
+                  setScreen("search");
+                }}
+              />
+            )}
+
+            {activeTab === "profile" && (
+              <ProfileScreen
+                criteria={criteria}
+                favoriteCount={favoriteIds.length}
+                resultsCount={results.length}
+              />
+            )}
+          </View>
+
+          <BottomTabs
+            activeTab={activeTab}
+            onTabChange={(tab) => setActiveTab(tab)}
+          />
+        </View>
       )}
 
       {screen === "detail" && selected && (
         <DetailScreen
           restaurant={selected}
-          onBack={() => setScreen("results")}
+          isFavorite={favoriteIds.includes(selected.id)}
+          onBack={() => setScreen(activeTab === "search" ? "results" : "search")}
           onOpenRoute={() => setScreen("route")}
+          onToggleFavorite={() => toggleFavorite(selected.id)}
           onShare={shareRestaurant}
         />
       )}
@@ -478,17 +557,21 @@ function ResultsScreen({
   results,
   topPick,
   decisionMode,
+  favoriteIds,
   onDecisionModeChange,
   onBack,
-  onOpenDetail
+  onOpenDetail,
+  onToggleFavorite
 }: {
   criteria: SearchCriteria;
   results: ScoredRestaurant[];
   topPick?: ScoredRestaurant;
   decisionMode: DecisionMode;
+  favoriteIds: string[];
   onDecisionModeChange: (mode: DecisionMode) => void;
   onBack: () => void;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
     <View style={styles.flex}>
@@ -526,7 +609,12 @@ function ResultsScreen({
         {decisionMode === "pick" && topPick ? (
           <View>
             <Text style={styles.kicker}>Meilleur choix maintenant</Text>
-            <FeaturedRestaurantCard restaurant={topPick} onPress={onOpenDetail} />
+            <FeaturedRestaurantCard
+              restaurant={topPick}
+              isFavorite={favoriteIds.includes(topPick.id)}
+              onPress={onOpenDetail}
+              onToggleFavorite={onToggleFavorite}
+            />
           </View>
         ) : (
           <View style={styles.listGap}>
@@ -535,7 +623,9 @@ function ResultsScreen({
               <RestaurantCard
                 key={restaurant.id}
                 restaurant={restaurant}
+                isFavorite={favoriteIds.includes(restaurant.id)}
                 onPress={onOpenDetail}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </View>
@@ -547,13 +637,17 @@ function ResultsScreen({
 
 function DetailScreen({
   restaurant,
+  isFavorite,
   onBack,
   onOpenRoute,
+  onToggleFavorite,
   onShare
 }: {
   restaurant: ScoredRestaurant;
+  isFavorite: boolean;
   onBack: () => void;
   onOpenRoute: () => void;
+  onToggleFavorite: () => void;
   onShare: () => void;
 }) {
   const confirmedDiet = Object.entries(restaurant.dietary).filter(
@@ -666,6 +760,13 @@ function DetailScreen({
         <Pressable style={styles.iconButton} onPress={onShare}>
           <Share2 size={21} color={colors.brand} />
         </Pressable>
+        <Pressable style={styles.iconButton} onPress={onToggleFavorite}>
+          <Heart
+            size={21}
+            color={isFavorite ? colors.coral : colors.brand}
+            fill={isFavorite ? colors.coral : "transparent"}
+          />
+        </Pressable>
         <Pressable style={styles.routeButton} onPress={onOpenRoute}>
           <Navigation size={20} color={colors.surface} />
           <Text style={styles.routeButtonText}>Itinéraire</Text>
@@ -708,6 +809,341 @@ function RouteScreen({
           />
         </View>
       </View>
+    </View>
+  );
+}
+
+function MapScreen({
+  criteria,
+  results,
+  favoriteIds,
+  onOpenDetail,
+  onToggleFavorite,
+  onGoSearch
+}: {
+  criteria: SearchCriteria;
+  results: ScoredRestaurant[];
+  favoriteIds: string[];
+  onOpenDetail: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
+  onGoSearch: () => void;
+}) {
+  const visibleResults = results.slice(0, 8);
+
+  return (
+    <View style={styles.flex}>
+      <View style={styles.tabHeader}>
+        <Text style={styles.tabTitle}>Carte</Text>
+        <Text style={styles.tabSubtitle}>
+          {results.length > 0
+            ? `${results.length} restaurants autour de ${criteria.locationLabel}`
+            : "Lancez une recherche pour remplir la carte."}
+        </Text>
+      </View>
+
+      {results.length === 0 ? (
+        <EmptyState
+          icon={<Map size={30} color={colors.brand} />}
+          title="Aucune recherche pour l'instant"
+          text="La carte affichera les restaurants issus de votre dernière recherche."
+          actionLabel="Faire une recherche"
+          onAction={onGoSearch}
+        />
+      ) : (
+        <ScrollView contentContainerStyle={styles.mapContent}>
+          <View style={styles.mapCanvas}>
+            <View style={styles.mapRoadHorizontal} />
+            <View style={styles.mapRoadVertical} />
+            <View style={styles.mapAreaOne} />
+            <View style={styles.mapAreaTwo} />
+            {visibleResults.map((restaurant, index) => (
+              <Pressable
+                key={restaurant.id}
+                style={[
+                  styles.mapPin,
+                  {
+                    left: `${18 + ((index * 23) % 66)}%`,
+                    top: `${16 + ((index * 31) % 62)}%`
+                  }
+                ]}
+                onPress={() => onOpenDetail(restaurant)}
+              >
+                <Text style={styles.mapPinText}>{index + 1}</Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={styles.listGap}>
+            {visibleResults.map((restaurant) => (
+              <RestaurantCard
+                key={restaurant.id}
+                restaurant={restaurant}
+                isFavorite={favoriteIds.includes(restaurant.id)}
+                onPress={onOpenDetail}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+function FavoritesScreen({
+  favorites,
+  favoriteSort,
+  onFavoriteSortChange,
+  onOpenDetail,
+  onToggleFavorite,
+  onGoSearch
+}: {
+  favorites: ScoredRestaurant[];
+  favoriteSort: FavoriteSort;
+  onFavoriteSortChange: (sort: FavoriteSort) => void;
+  onOpenDetail: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
+  onGoSearch: () => void;
+}) {
+  return (
+    <View style={styles.flex}>
+      <View style={styles.tabHeader}>
+        <Text style={styles.tabTitle}>Favoris</Text>
+        <Text style={styles.tabSubtitle}>
+          {favorites.length > 0
+            ? `${favorites.length} restaurants sauvegardés`
+            : "Gardez vos meilleures adresses sous la main."}
+        </Text>
+      </View>
+
+      {favorites.length === 0 ? (
+        <EmptyState
+          icon={<Bookmark size={30} color={colors.brand} />}
+          title="Aucun favori"
+          text="Ajoutez des restaurants avec le cœur depuis les résultats ou une fiche."
+          actionLabel="Explorer les restaurants"
+          onAction={onGoSearch}
+        />
+      ) : (
+        <ScrollView contentContainerStyle={styles.resultsContent}>
+          <View style={styles.sortBar}>
+            <Pressable
+              style={[
+                styles.sortButton,
+                favoriteSort === "criteria" && styles.sortButtonActive
+              ]}
+              onPress={() => onFavoriteSortChange("criteria")}
+            >
+              <ListFilter
+                size={16}
+                color={favoriteSort === "criteria" ? colors.surface : colors.brand}
+              />
+              <Text
+                style={[
+                  styles.sortButtonText,
+                  favoriteSort === "criteria" && styles.sortButtonTextActive
+                ]}
+              >
+                Critères
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.sortButton,
+                favoriteSort === "distance" && styles.sortButtonActive
+              ]}
+              onPress={() => onFavoriteSortChange("distance")}
+            >
+              <MapPin
+                size={16}
+                color={favoriteSort === "distance" ? colors.surface : colors.brand}
+              />
+              <Text
+                style={[
+                  styles.sortButtonText,
+                  favoriteSort === "distance" && styles.sortButtonTextActive
+                ]}
+              >
+                Distance
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.listGap}>
+            {favorites.map((restaurant) => (
+              <RestaurantCard
+                key={restaurant.id}
+                restaurant={restaurant}
+                isFavorite
+                onPress={onOpenDetail}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </View>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+function ProfileScreen({
+  criteria,
+  favoriteCount,
+  resultsCount
+}: {
+  criteria: SearchCriteria;
+  favoriteCount: number;
+  resultsCount: number;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.profileContent}>
+      <View style={styles.profileHero}>
+        <View style={styles.profileAvatar}>
+          <UserRound size={30} color={colors.surface} />
+        </View>
+        <View style={styles.profileHeroCopy}>
+          <Text style={styles.profileName}>Mode invité</Text>
+          <Text style={styles.profileSubtext}>
+            Connectez-vous plus tard pour synchroniser vos favoris.
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.profileStats}>
+        <View style={styles.profileStat}>
+          <Text style={styles.profileStatValue}>{favoriteCount}</Text>
+          <Text style={styles.profileStatLabel}>favoris</Text>
+        </View>
+        <View style={styles.profileStat}>
+          <Text style={styles.profileStatValue}>{resultsCount}</Text>
+          <Text style={styles.profileStatLabel}>résultats</Text>
+        </View>
+        <View style={styles.profileStat}>
+          <Text style={styles.profileStatValue}>{budgetLabels[criteria.budget]}</Text>
+          <Text style={styles.profileStatLabel}>budget</Text>
+        </View>
+      </View>
+
+      <View style={styles.profileSection}>
+        <Text style={styles.profileSectionTitle}>Connexion</Text>
+        <ProfileRow icon={<UserRound size={20} color={colors.brand} />} label="Se connecter ou créer un compte" />
+        <ProfileRow icon={<Heart size={20} color={colors.coral} />} label="Synchroniser les favoris" />
+      </View>
+
+      <View style={styles.profileSection}>
+        <Text style={styles.profileSectionTitle}>Préférences</Text>
+        <ProfileRow icon={<SlidersHorizontal size={20} color={colors.brand} />} label={`Budget par défaut ${budgetLabels[criteria.budget]}`} />
+        <ProfileRow icon={<ShieldCheck size={20} color={colors.success} />} label="Régimes alimentaires" />
+        <ProfileRow icon={<LocateFixed size={20} color={colors.coral} />} label="Localisation et confidentialité" />
+      </View>
+
+      <View style={styles.profileSection}>
+        <Text style={styles.profileSectionTitle}>Paramètres</Text>
+        <ProfileRow icon={<UserCog size={20} color={colors.blue} />} label="Notifications et langue" />
+        <ProfileRow icon={<Compass size={20} color={colors.brand} />} label="Applications d'itinéraire" />
+      </View>
+    </ScrollView>
+  );
+}
+
+function ProfileRow({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <Pressable style={styles.profileRow}>
+      <View style={styles.profileRowIcon}>{icon}</View>
+      <Text style={styles.profileRowText}>{label}</Text>
+      <ChevronRight size={18} color={colors.muted} />
+    </Pressable>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  text,
+  actionLabel,
+  onAction
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <View style={styles.emptyState}>
+      <View style={styles.emptyIcon}>{icon}</View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyText}>{text}</Text>
+      <Pressable style={styles.emptyButton} onPress={onAction}>
+        <Text style={styles.emptyButtonText}>{actionLabel}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function BottomTabs({
+  activeTab,
+  onTabChange
+}: {
+  activeTab: MainTab;
+  onTabChange: (tab: MainTab) => void;
+}) {
+  const tabs: Array<{
+    id: MainTab;
+    label: string;
+    icon: (active: boolean) => React.ReactNode;
+  }> = [
+    {
+      id: "search",
+      label: "Recherche",
+      icon: (active) => (
+        <Search size={21} color={active ? colors.brand : colors.muted} />
+      )
+    },
+    {
+      id: "map",
+      label: "Carte",
+      icon: (active) => (
+        <Map size={21} color={active ? colors.brand : colors.muted} />
+      )
+    },
+    {
+      id: "favorites",
+      label: "Favoris",
+      icon: (active) => (
+        <Heart
+          size={21}
+          color={active ? colors.brand : colors.muted}
+          fill={active ? colors.brand : "transparent"}
+        />
+      )
+    },
+    {
+      id: "profile",
+      label: "Profil",
+      icon: (active) => (
+        <UserRound size={21} color={active ? colors.brand : colors.muted} />
+      )
+    }
+  ];
+
+  return (
+    <View style={styles.bottomTabs}>
+      {tabs.map((tab) => {
+        const active = activeTab === tab.id;
+        return (
+          <Pressable
+            key={tab.id}
+            style={styles.bottomTab}
+            onPress={() => onTabChange(tab.id)}
+          >
+            {tab.icon(active)}
+            <Text style={[styles.bottomTabText, active && styles.bottomTabTextActive]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -790,12 +1226,25 @@ function NumberSliderField({
 }) {
   const [trackWidth, setTrackWidth] = useState(1);
   const [draftValue, setDraftValue] = useState(formatDecimal(value));
+  const onChangeRef = useRef(onChange);
+  const trackWidthRef = useRef(trackWidth);
+  const minRef = useRef(min);
+  const maxRef = useRef(max);
+  const stepRef = useRef(step);
   const dragStartValue = useRef(value);
   const percent = ((value - min) / (max - min)) * 100;
 
   useEffect(() => {
     setDraftValue(formatDecimal(value));
   }, [value]);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    trackWidthRef.current = trackWidth;
+    minRef.current = min;
+    maxRef.current = max;
+    stepRef.current = step;
+  }, [onChange, trackWidth, min, max, step]);
 
   function commitValue(rawValue: string) {
     const parsed = Number(rawValue.replace(",", "."));
@@ -805,35 +1254,46 @@ function NumberSliderField({
     }
 
     const nextValue = roundToStep(clamp(parsed, min, max), step);
-    onChange(Number(nextValue.toFixed(1)));
+    onChangeRef.current(Number(nextValue.toFixed(1)));
   }
 
   function normalizeValue(rawValue: number) {
-    return Number(roundToStep(clamp(rawValue, min, max), step).toFixed(1));
+    return Number(
+      roundToStep(
+        clamp(rawValue, minRef.current, maxRef.current),
+        stepRef.current
+      ).toFixed(1)
+    );
   }
 
   function valueFromPosition(event: GestureResponderEvent) {
-    const x = clamp(event.nativeEvent.locationX, 0, trackWidth);
-    return normalizeValue(min + (x / trackWidth) * (max - min));
+    const width = trackWidthRef.current;
+    const x = clamp(event.nativeEvent.locationX, 0, width);
+    return normalizeValue(
+      minRef.current + (x / width) * (maxRef.current - minRef.current)
+    );
   }
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
-        onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const nextValue = valueFromPosition(event);
-          dragStartValue.current = nextValue;
-          onChange(nextValue);
-        },
-        onPanResponderMove: (_event, gestureState) => {
-          const deltaValue = (gestureState.dx / trackWidth) * (max - min);
-          onChange(normalizeValue(dragStartValue.current + deltaValue));
-        }
-      }),
-    [trackWidth, min, max, step, onChange]
-  );
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (event) => {
+        const nextValue = valueFromPosition(event);
+        dragStartValue.current = nextValue;
+        onChangeRef.current(nextValue);
+      },
+      onPanResponderMove: (_event, gestureState) => {
+        const width = trackWidthRef.current;
+        const deltaValue =
+          (gestureState.dx / width) * (maxRef.current - minRef.current);
+        const nextValue = normalizeValue(dragStartValue.current + deltaValue);
+
+        onChangeRef.current(nextValue);
+      }
+    })
+  ).current;
 
   return (
     <View style={styles.numberField}>
@@ -847,7 +1307,6 @@ function NumberSliderField({
             value={draftValue}
             onChangeText={(text) => {
               setDraftValue(text);
-              if (text.trim().length > 0) commitValue(text);
             }}
             onBlur={() => commitValue(draftValue)}
             onSubmitEditing={() => commitValue(draftValue)}
@@ -860,9 +1319,11 @@ function NumberSliderField({
       </View>
       <View
         style={styles.sliderTrack}
-        onLayout={(event: LayoutChangeEvent) =>
-          setTrackWidth(Math.max(1, event.nativeEvent.layout.width))
-        }
+        onLayout={(event: LayoutChangeEvent) => {
+          const nextTrackWidth = Math.max(1, event.nativeEvent.layout.width);
+          trackWidthRef.current = nextTrackWidth;
+          setTrackWidth(nextTrackWidth);
+        }}
         {...panResponder.panHandlers}
       >
         <View style={styles.sliderBase} />
@@ -890,10 +1351,14 @@ function NumberSliderField({
 
 function RestaurantCard({
   restaurant,
-  onPress
+  isFavorite,
+  onPress,
+  onToggleFavorite
 }: {
   restaurant: ScoredRestaurant;
+  isFavorite: boolean;
   onPress: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
     <Pressable style={styles.restaurantCard} onPress={() => onPress(restaurant)}>
@@ -903,7 +1368,19 @@ function RestaurantCard({
           <Text numberOfLines={1} style={styles.restaurantName}>
             {restaurant.name}
           </Text>
-          <ChevronRight size={18} color={colors.muted} />
+          <Pressable
+            style={styles.favoriteButton}
+            onPress={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(restaurant.id);
+            }}
+          >
+            <Heart
+              size={18}
+              color={isFavorite ? colors.coral : colors.muted}
+              fill={isFavorite ? colors.coral : "transparent"}
+            />
+          </Pressable>
         </View>
         <Text numberOfLines={1} style={styles.restaurantMeta}>
           {restaurant.cuisines.slice(0, 2).join(", ")} · {budgetLabels[restaurant.budget]}
@@ -927,16 +1404,35 @@ function RestaurantCard({
 
 function FeaturedRestaurantCard({
   restaurant,
-  onPress
+  isFavorite,
+  onPress,
+  onToggleFavorite
 }: {
   restaurant: ScoredRestaurant;
+  isFavorite: boolean;
   onPress: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
     <Pressable style={styles.featuredCard} onPress={() => onPress(restaurant)}>
       <Image source={{ uri: restaurant.photoUrl }} style={styles.featuredImage} />
       <View style={styles.featuredBody}>
-        <Text style={styles.featuredName}>{restaurant.name}</Text>
+        <View style={styles.featuredTitleRow}>
+          <Text style={styles.featuredName}>{restaurant.name}</Text>
+          <Pressable
+            style={styles.favoriteButtonLarge}
+            onPress={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(restaurant.id);
+            }}
+          >
+            <Heart
+              size={20}
+              color={isFavorite ? colors.coral : colors.muted}
+              fill={isFavorite ? colors.coral : "transparent"}
+            />
+          </Pressable>
+        </View>
         <Text style={styles.featuredMeta}>
           {restaurant.cuisines.join(", ")} · {budgetLabels[restaurant.budget]}
         </Text>
@@ -992,6 +1488,14 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     backgroundColor: colors.background
+  },
+  tabShell: {
+    flex: 1,
+    backgroundColor: colors.background
+  },
+  tabContent: {
+    flex: 1,
+    paddingBottom: 78
   },
   screen: {
     padding: 20,
@@ -1170,7 +1674,7 @@ const styles = StyleSheet.create({
     marginLeft: 3
   },
   sliderTrack: {
-    height: 28,
+    height: 40,
     justifyContent: "center"
   },
   sliderBase: {
@@ -1377,6 +1881,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6
   },
+  favoriteButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.background
+  },
   restaurantName: {
     flex: 1,
     color: colors.ink,
@@ -1441,11 +1953,25 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 10
   },
+  featuredTitleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10
+  },
   featuredName: {
+    flex: 1,
     color: colors.ink,
     fontSize: 25,
     lineHeight: 30,
     fontWeight: "900"
+  },
+  favoriteButtonLarge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.background
   },
   featuredMeta: {
     color: colors.muted,
@@ -1580,6 +2106,35 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 12
   },
+  bottomTabs: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 76,
+    paddingTop: 8,
+    paddingBottom: 14,
+    paddingHorizontal: 10,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    flexDirection: "row",
+    ...shadow
+  },
+  bottomTab: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4
+  },
+  bottomTabText: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  bottomTabTextActive: {
+    color: colors.brand
+  },
   iconButton: {
     width: 54,
     height: 54,
@@ -1643,5 +2198,256 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 16,
     fontWeight: "900"
+  },
+  tabHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 12,
+    gap: 4
+  },
+  tabTitle: {
+    color: colors.ink,
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "900"
+  },
+  tabSubtitle: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "700"
+  },
+  mapContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+    gap: 14
+  },
+  mapCanvas: {
+    height: 310,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.panel,
+    overflow: "hidden",
+    ...shadow
+  },
+  mapRoadHorizontal: {
+    position: "absolute",
+    left: -30,
+    right: -30,
+    top: "48%",
+    height: 26,
+    backgroundColor: colors.surface,
+    transform: [{ rotate: "-10deg" }]
+  },
+  mapRoadVertical: {
+    position: "absolute",
+    top: -40,
+    bottom: -40,
+    left: "52%",
+    width: 24,
+    backgroundColor: colors.surface,
+    transform: [{ rotate: "18deg" }]
+  },
+  mapAreaOne: {
+    position: "absolute",
+    width: 120,
+    height: 96,
+    borderRadius: 18,
+    backgroundColor: colors.softBlue,
+    left: 22,
+    top: 24
+  },
+  mapAreaTwo: {
+    position: "absolute",
+    width: 142,
+    height: 112,
+    borderRadius: 20,
+    backgroundColor: colors.softCoral,
+    right: 20,
+    bottom: 24
+  },
+  mapPin: {
+    position: "absolute",
+    width: 34,
+    height: 34,
+    marginLeft: -17,
+    marginTop: -17,
+    borderRadius: 17,
+    backgroundColor: colors.coral,
+    borderWidth: 3,
+    borderColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow
+  },
+  mapPinText: {
+    color: colors.surface,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  sortBar: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 14
+  },
+  sortButton: {
+    flex: 1,
+    height: 42,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7
+  },
+  sortButtonActive: {
+    backgroundColor: colors.brand,
+    borderColor: colors.brand
+  },
+  sortButtonText: {
+    color: colors.brand,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  sortButtonTextActive: {
+    color: colors.surface
+  },
+  emptyState: {
+    flex: 1,
+    paddingHorizontal: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12
+  },
+  emptyIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: colors.panel,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4
+  },
+  emptyTitle: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  emptyText: {
+    color: colors.muted,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: "700",
+    textAlign: "center"
+  },
+  emptyButton: {
+    minHeight: 46,
+    borderRadius: radii.md,
+    paddingHorizontal: 18,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4
+  },
+  emptyButtonText: {
+    color: colors.surface,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  profileContent: {
+    padding: 20,
+    paddingBottom: 102,
+    gap: 16
+  },
+  profileHero: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    padding: 16,
+    borderRadius: radii.lg,
+    backgroundColor: colors.ink
+  },
+  profileAvatar: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  profileHeroCopy: {
+    flex: 1,
+    gap: 3
+  },
+  profileName: {
+    color: colors.surface,
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  profileSubtext: {
+    color: colors.line,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: "700"
+  },
+  profileStats: {
+    flexDirection: "row",
+    gap: 10
+  },
+  profileStat: {
+    flex: 1,
+    padding: 14,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
+  },
+  profileStatValue: {
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: "900"
+  },
+  profileStatLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "800",
+    marginTop: 2
+  },
+  profileSection: {
+    gap: 9
+  },
+  profileSectionTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  profileRow: {
+    minHeight: 58,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 13,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  profileRowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.panel,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  profileRowText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800"
   }
 });
