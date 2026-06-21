@@ -9,10 +9,49 @@ import { budgetLabels, contextLabels, dietaryLabels } from "../theme";
 const confirmedDietScore = 14;
 const unknownDietScore = 3;
 
+function normalizeText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 function cuisineMatches(restaurant: Restaurant, cuisine: string) {
+  const normalizedCuisine = normalizeText(cuisine);
+
   return restaurant.cuisines.some(
-    (item) => item.toLowerCase() === cuisine.toLowerCase()
+    (item) => normalizeText(item) === normalizedCuisine
   );
+}
+
+function contextMatches(restaurant: Restaurant, criteria: SearchCriteria) {
+  if (criteria.contexts.length === 0) return true;
+  return criteria.contexts.some((context) => restaurant.contexts.includes(context));
+}
+
+function cuisinesMatch(restaurant: Restaurant, criteria: SearchCriteria) {
+  if (criteria.cuisines.length === 0) return true;
+  return criteria.cuisines.some((cuisine) => cuisineMatches(restaurant, cuisine));
+}
+
+function dietaryMatches(restaurant: Restaurant, criteria: SearchCriteria) {
+  return criteria.dietary.every((diet) => restaurant.dietary[diet] === "confirmed");
+}
+
+export function matchesSearchCriteria(
+  restaurant: Restaurant,
+  criteria: SearchCriteria
+) {
+  if (criteria.openNowOnly && !restaurant.openNow) return false;
+  if (restaurant.rating < criteria.minRating) return false;
+  if (restaurant.distanceKm > criteria.maxDistanceKm) return false;
+  if (criteria.budget !== null && restaurant.budget !== criteria.budget) return false;
+  if (!contextMatches(restaurant, criteria)) return false;
+  if (!cuisinesMatch(restaurant, criteria)) return false;
+  if (!dietaryMatches(restaurant, criteria)) return false;
+
+  return true;
 }
 
 function formatDietReason(diet: DietaryKey) {
@@ -43,13 +82,22 @@ export function scoreRestaurant(
 
   score += Math.min(12, Math.log10(restaurant.reviewCount + 1) * 4);
 
-  const budgetGap = Math.abs(restaurant.budget - criteria.budget);
-  score += budgetGap === 0 ? 14 : budgetGap === 1 ? 7 : -8;
-  if (budgetGap === 0) matchReasons.push(`Budget ${budgetLabels[restaurant.budget]}`);
+  if (criteria.budget !== null) {
+    const budgetGap = Math.abs(restaurant.budget - criteria.budget);
+    score += budgetGap === 0 ? 14 : budgetGap === 1 ? 7 : -8;
+    if (budgetGap === 0) {
+      matchReasons.push(`Budget ${budgetLabels[restaurant.budget]}`);
+    }
+  }
 
-  if (restaurant.contexts.includes(criteria.context)) {
-    score += 12;
-    matchReasons.push(`Adapté ${contextLabels[criteria.context].toLowerCase()}`);
+  const contextHits = criteria.contexts.filter((context) =>
+    restaurant.contexts.includes(context)
+  );
+  score += contextHits.length * 12;
+  if (contextHits.length > 0) {
+    matchReasons.push(
+      `Adapté ${contextLabels[contextHits[0]].toLowerCase()}`
+    );
   }
 
   const cuisineHits = criteria.cuisines.filter((cuisine) =>
@@ -87,7 +135,7 @@ export function rankRestaurants(
   criteria: SearchCriteria
 ): ScoredRestaurant[] {
   return restaurants
+    .filter((restaurant) => matchesSearchCriteria(restaurant, criteria))
     .map((restaurant) => scoreRestaurant(restaurant, criteria))
-    .filter((restaurant) => restaurant.score > -20)
     .sort((a, b) => b.score - a.score);
 }

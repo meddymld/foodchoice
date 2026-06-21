@@ -27,11 +27,17 @@ export type Coordinates = {
   longitude: number;
 };
 
+export type WeeklyOpeningHour = {
+  day: string;
+  hours: string;
+  closed?: boolean;
+};
+
 export type SearchCriteria = {
   locationLabel: string;
   coordinates?: Coordinates;
-  context: MealContext;
-  budget: BudgetLevel;
+  contexts: MealContext[];
+  budget: BudgetLevel | null;
   cuisines: string[];
   dietary: DietaryKey[];
   minRating: number;
@@ -51,6 +57,7 @@ export type Restaurant = {
   pricePerPerson: string;
   openNow: boolean;
   closesAt: string;
+  weeklyHours?: WeeklyOpeningHour[];
   categories: string[];
   cuisines: string[];
   contexts: MealContext[];

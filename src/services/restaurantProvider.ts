@@ -7,12 +7,19 @@ export interface RestaurantProvider {
 
 export class MockRestaurantProvider implements RestaurantProvider {
   async search(criteria: SearchCriteria): Promise<Restaurant[]> {
-    const normalizedLocation = criteria.locationLabel.trim().toLowerCase();
-    const locationBoost = normalizedLocation.length > 0 ? 0 : 0;
+    const normalizedLocation = normalizeText(criteria.locationLabel);
+    const searchedCity = ["paris", "toulouse", "marseille"].find((city) =>
+      normalizedLocation.includes(city)
+    );
+    const cityRestaurants = searchedCity
+      ? restaurants.filter((restaurant) =>
+          normalizeText(restaurant.address).includes(searchedCity)
+        )
+      : restaurants;
 
-    return restaurants.map((restaurant) => ({
+    return cityRestaurants.map((restaurant) => ({
       ...restaurant,
-      distanceKm: Math.max(0.3, restaurant.distanceKm - locationBoost)
+      distanceKm: Math.max(0.3, restaurant.distanceKm)
     }));
   }
 }
@@ -23,4 +30,12 @@ export class GooglePlacesRestaurantProvider implements RestaurantProvider {
       "Google Places integration is intentionally isolated behind RestaurantProvider."
     );
   }
+}
+
+function normalizeText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }

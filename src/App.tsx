@@ -29,10 +29,12 @@ import {
   Clock3,
   Compass,
   Heart,
+  Languages,
   ListFilter,
   LocateFixed,
   Map,
   MapPin,
+  Moon,
   Navigation,
   Phone,
   Search,
@@ -45,15 +47,18 @@ import {
   UserRound
 } from "lucide-react-native";
 
-import { rankRestaurants } from "./domain/scoring";
+import { rankRestaurants, scoreRestaurant } from "./domain/scoring";
+import { restaurants as allRestaurants } from "./data/restaurants";
 import { MockRestaurantProvider } from "./services/restaurantProvider";
 import {
   BudgetLevel,
+  Coordinates,
   DietaryKey,
   MealContext,
   NavigationApp,
   ScoredRestaurant,
-  SearchCriteria
+  SearchCriteria,
+  WeeklyOpeningHour
 } from "./types";
 import {
   budgetLabels,
@@ -86,7 +91,12 @@ const cuisineOptions = [
   "sushi",
   "fruits de mer",
   "barbecue",
-  "desserts"
+  "desserts",
+  "café",
+  "brunch",
+  "street food",
+  "fast food",
+  "gastronomique"
 ];
 
 const dietaryOptions: DietaryKey[] = [
@@ -110,9 +120,9 @@ const contextOptions: MealContext[] = [
 
 const defaultCriteria: SearchCriteria = {
   locationLabel: "",
-  context: "friends",
-  budget: 2,
-  cuisines: ["Méditerranéenne"],
+  contexts: [],
+  budget: null,
+  cuisines: [],
   dietary: [],
   minRating: 4,
   openNowOnly: true,
@@ -131,25 +141,54 @@ export default function App() {
   const [results, setResults] = useState<ScoredRestaurant[]>([]);
   const [selected, setSelected] = useState<ScoredRestaurant | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
-  const [favoriteSort, setFavoriteSort] = useState<FavoriteSort>("criteria");
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("list");
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
 
+  // Best match used by the recommendation mode.
   const topPick = useMemo(() => results[0], [results]);
-  const favorites = useMemo(
-    () =>
-      results
-        .filter((restaurant) => favoriteIds.includes(restaurant.id))
-        .sort((a, b) =>
-          favoriteSort === "distance"
-            ? a.distanceKm - b.distanceKm
-            : b.score - a.score
-        ),
-    [favoriteIds, favoriteSort, results]
+
+  const currentLocation = useMemo(
+    () => getCurrentSearchCoordinates(criteria),
+    [criteria]
   );
 
+  // Favorites are rebuilt from the full restaurant dataset so they are kept even
+  // after changing city or launching a new search.
+  const favorites = useMemo(
+    () =>
+      favoriteIds
+        .map((id) => {
+          const currentResult = results.find((restaurant) => restaurant.id === id);
+          const baseRestaurant =
+            currentResult ?? allRestaurants.find((restaurant) => restaurant.id === id);
+          if (!baseRestaurant) return null;
+
+          const distanceKm = currentLocation
+            ? calculateDistanceKm(currentLocation, baseRestaurant.coordinates)
+            : baseRestaurant.distanceKm;
+
+          return {
+            ...scoreRestaurant(baseRestaurant, criteria),
+            distanceKm
+          };
+        })
+        .filter((restaurant): restaurant is ScoredRestaurant => restaurant !== null)
+        .sort((a, b) => a.distanceKm - b.distanceKm),
+    [criteria, currentLocation, favoriteIds, results]
+  );
+
+  // Executes the main restaurant search after required fields are filled, then
+  // ranks the provider results with the product scoring rules.
   async function runSearch(mode: DecisionMode = decisionMode) {
+    if (criteria.locationLabel.trim().length === 0) {
+      setSearchError("Les champs requis ne sont pas remplis.");
+      return;
+    }
+
+    setSearchError(null);
     setLoading(true);
     try {
       const resolvedCriteria = await resolveCriteriaLocation(criteria);
@@ -205,11 +244,37 @@ export default function App() {
     }
   }
 
-  async function useCurrentLocation() {
-    const resolvedCriteria = await resolveCriteriaLocation(criteria, true);
-    if (resolvedCriteria) setCriteria(resolvedCriteria);
+  // In the mock app, the current-position shortcut fills a deterministic test
+  // location so the Toulouse dataset can be tested without real GPS.
+  function useCurrentLocation() {
+    setCriteria((current) => ({
+      ...current,
+      locationLabel: "Toulouse",
+      coordinates: {
+        latitude: 43.6047,
+        longitude: 1.4442
+      }
+    }));
+    setSearchError(null);
   }
 
+  // Updates criteria from the search form and clears validation once location exists.
+  function updateCriteria(nextCriteria: SearchCriteria) {
+    setCriteria(nextCriteria);
+    if (nextCriteria.locationLabel.trim().length > 0) setSearchError(null);
+  }
+
+  // Adds or removes a meal context. With no selected context, this filter is ignored.
+  function toggleContext(context: MealContext) {
+    setCriteria((current) => ({
+      ...current,
+      contexts: current.contexts.includes(context)
+        ? current.contexts.filter((item) => item !== context)
+        : [...current.contexts, context]
+    }));
+  }
+
+  // Adds or removes a cuisine filter while preserving the rest of the criteria.
   function toggleCuisine(cuisine: string) {
     setCriteria((current) => ({
       ...current,
@@ -219,6 +284,7 @@ export default function App() {
     }));
   }
 
+  // Adds or removes a dietary constraint from the search filters.
   function toggleDiet(diet: DietaryKey) {
     setCriteria((current) => ({
       ...current,
@@ -228,11 +294,13 @@ export default function App() {
     }));
   }
 
+  // Opens the restaurant detail screen and stores the selected card context.
   function openDetail(restaurant: ScoredRestaurant) {
     setSelected(restaurant);
     setScreen("detail");
   }
 
+  // Keeps favorites lightweight for the MVP by storing restaurant ids locally.
   function toggleFavorite(restaurantId: string) {
     setFavoriteIds((current) =>
       current.includes(restaurantId)
@@ -241,6 +309,7 @@ export default function App() {
     );
   }
 
+  // Builds deep links for the supported navigation apps.
   async function openRoute(app: NavigationApp) {
     if (!selected) return;
 
@@ -264,6 +333,7 @@ export default function App() {
     await Linking.openURL(urls[app]);
   }
 
+  // Shares the selected restaurant through the native share sheet.
   async function shareRestaurant() {
     if (!selected) return;
     await Share.share({
@@ -272,18 +342,21 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
+    <SafeAreaView style={[styles.safeArea, isDarkMode && styles.darkSafeArea]}>
+      <StatusBar style={isDarkMode ? "light" : "dark"} />
       {screen !== "detail" && screen !== "route" && (
-        <View style={styles.tabShell}>
-          <View style={styles.tabContent}>
+        <View style={[styles.tabShell, isDarkMode && styles.darkTabShell]}>
+          <View style={[styles.tabContent, isDarkMode && styles.darkTabContent]}>
             {activeTab === "search" && screen === "search" && (
               <SearchScreen
                 criteria={criteria}
+                searchError={searchError}
                 locating={locating}
                 loading={loading}
-                onCriteriaChange={setCriteria}
+                isDarkMode={isDarkMode}
+                onCriteriaChange={updateCriteria}
                 onUseLocation={useCurrentLocation}
+                onToggleContext={toggleContext}
                 onToggleCuisine={toggleCuisine}
                 onToggleDiet={toggleDiet}
                 onSearch={() => runSearch("list")}
@@ -298,7 +371,7 @@ export default function App() {
                 topPick={topPick}
                 decisionMode={decisionMode}
                 favoriteIds={favoriteIds}
-                onDecisionModeChange={setDecisionMode}
+                isDarkMode={isDarkMode}
                 onBack={() => setScreen("search")}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
@@ -310,6 +383,7 @@ export default function App() {
                 criteria={criteria}
                 results={results}
                 favoriteIds={favoriteIds}
+                isDarkMode={isDarkMode}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
                 onGoSearch={() => {
@@ -322,8 +396,7 @@ export default function App() {
             {activeTab === "favorites" && (
               <FavoritesScreen
                 favorites={favorites}
-                favoriteSort={favoriteSort}
-                onFavoriteSortChange={setFavoriteSort}
+                isDarkMode={isDarkMode}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
                 onGoSearch={() => {
@@ -338,12 +411,15 @@ export default function App() {
                 criteria={criteria}
                 favoriteCount={favoriteIds.length}
                 resultsCount={results.length}
+                isDarkMode={isDarkMode}
+                onDarkModeChange={setIsDarkMode}
               />
             )}
           </View>
 
           <BottomTabs
             activeTab={activeTab}
+            isDarkMode={isDarkMode}
             onTabChange={(tab) => setActiveTab(tab)}
           />
         </View>
@@ -352,7 +428,9 @@ export default function App() {
       {screen === "detail" && selected && (
         <DetailScreen
           restaurant={selected}
+          criteria={criteria}
           isFavorite={favoriteIds.includes(selected.id)}
+          isDarkMode={isDarkMode}
           onBack={() => setScreen(activeTab === "search" ? "results" : "search")}
           onOpenRoute={() => setScreen("route")}
           onToggleFavorite={() => toggleFavorite(selected.id)}
@@ -363,6 +441,7 @@ export default function App() {
       {screen === "route" && selected && (
         <RouteScreen
           restaurant={selected}
+          isDarkMode={isDarkMode}
           onBack={() => setScreen("detail")}
           onOpenRoute={openRoute}
         />
@@ -371,42 +450,56 @@ export default function App() {
   );
 }
 
+// Main filter screen: location, context, budget, cuisines and constraints.
 function SearchScreen({
   criteria,
+  searchError,
   locating,
   loading,
+  isDarkMode,
   onCriteriaChange,
   onUseLocation,
+  onToggleContext,
   onToggleCuisine,
   onToggleDiet,
   onSearch,
   onPick
 }: {
   criteria: SearchCriteria;
+  searchError: string | null;
   locating: boolean;
   loading: boolean;
+  isDarkMode: boolean;
   onCriteriaChange: (criteria: SearchCriteria) => void;
   onUseLocation: () => void;
+  onToggleContext: (context: MealContext) => void;
   onToggleCuisine: (cuisine: string) => void;
   onToggleDiet: (diet: DietaryKey) => void;
   onSearch: () => void;
   onPick: () => void;
 }) {
   return (
-    <ScrollView contentContainerStyle={styles.screen} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={[styles.screen, isDarkMode && styles.darkScreen]}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.brandRow}>
         <View style={styles.logoMark}>
           <Compass size={24} color={colors.surface} strokeWidth={2.4} />
         </View>
         <View>
-          <Text style={styles.brand}>foodchoice</Text>
-          <Text style={styles.tagline}>Trouver où manger, sans débat.</Text>
+          <Text style={[styles.brand, isDarkMode && styles.darkText]}>foodchoice</Text>
+          <Text style={[styles.tagline, isDarkMode && styles.darkMutedText]}>
+            Trouver où manger, sans débat.
+          </Text>
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Point de départ</Text>
-        <View style={styles.searchBox}>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>
+          Point de départ
+        </Text>
+        <View style={[styles.searchBox, isDarkMode && styles.darkSurface]}>
           <Search size={20} color={colors.muted} />
           <TextInput
             value={criteria.locationLabel}
@@ -415,11 +508,14 @@ function SearchScreen({
             }
             placeholder="Adresse, ville, quartier"
             placeholderTextColor={colors.muted}
-            style={styles.input}
+            style={[styles.input, isDarkMode && styles.darkText]}
             returnKeyType="search"
           />
         </View>
-        <Pressable style={styles.secondaryButton} onPress={onUseLocation}>
+        <Pressable
+          style={[styles.secondaryButton, isDarkMode && styles.darkSurface]}
+          onPress={onUseLocation}
+        >
           {locating ? (
             <ActivityIndicator color={colors.brand} />
           ) : (
@@ -430,35 +526,48 @@ function SearchScreen({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Contexte</Text>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Contexte</Text>
         <View style={styles.gridChips}>
           {contextOptions.map((context) => (
             <Chip
               key={context}
               label={contextLabels[context]}
-              active={criteria.context === context}
-              onPress={() => onCriteriaChange({ ...criteria, context })}
+              active={criteria.contexts.includes(context)}
+              isDarkMode={isDarkMode}
+              onPress={() => onToggleContext(context)}
             />
           ))}
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Budget</Text>
-        <View style={styles.segmented}>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Budget</Text>
+        <View style={[styles.segmented, isDarkMode && styles.darkSurface]}>
           {([1, 2, 3, 4] as BudgetLevel[]).map((budget) => (
             <Pressable
               key={budget}
               style={[
                 styles.segment,
-                criteria.budget === budget && styles.segmentActive
+                criteria.budget === budget && styles.segmentActive,
+                isDarkMode &&
+                  criteria.budget === budget &&
+                  styles.darkSegmentActive
               ]}
-              onPress={() => onCriteriaChange({ ...criteria, budget })}
+              onPress={() =>
+                onCriteriaChange({
+                  ...criteria,
+                  budget: criteria.budget === budget ? null : budget
+                })
+              }
             >
               <Text
                 style={[
                   styles.segmentText,
-                  criteria.budget === budget && styles.segmentTextActive
+                  isDarkMode && styles.darkMutedText,
+                  criteria.budget === budget && styles.segmentTextActive,
+                  isDarkMode &&
+                    criteria.budget === budget &&
+                    styles.darkChipTextActive
                 ]}
               >
                 {budgetLabels[budget]}
@@ -469,13 +578,14 @@ function SearchScreen({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Envies</Text>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Type de cuisine</Text>
         <View style={styles.gridChips}>
           {cuisineOptions.map((cuisine) => (
             <Chip
               key={cuisine}
               label={cuisine}
               active={criteria.cuisines.includes(cuisine)}
+              isDarkMode={isDarkMode}
               onPress={() => onToggleCuisine(cuisine)}
             />
           ))}
@@ -483,24 +593,29 @@ function SearchScreen({
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Contraintes alimentaires</Text>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>
+          Contraintes alimentaires
+        </Text>
         <View style={styles.gridChips}>
           {dietaryOptions.map((diet) => (
             <Chip
               key={diet}
               label={dietaryLabels[diet]}
               active={criteria.dietary.includes(diet)}
+              isDarkMode={isDarkMode}
               onPress={() => onToggleDiet(diet)}
             />
           ))}
         </View>
       </View>
 
-      <View style={styles.filtersPanel}>
+      <View style={[styles.filtersPanel, isDarkMode && styles.darkSurfaceRaised]}>
         <View style={styles.filterRow}>
           <View style={styles.iconLabel}>
             <Clock3 size={18} color={colors.brand} />
-            <Text style={styles.filterLabel}>Ouvert maintenant</Text>
+            <Text style={[styles.filterLabel, isDarkMode && styles.darkText]}>
+              Ouvert maintenant
+            </Text>
           </View>
           <Switch
             value={criteria.openNowOnly}
@@ -519,6 +634,7 @@ function SearchScreen({
           max={5}
           step={0.1}
           suffix="/5"
+          isDarkMode={isDarkMode}
           onChange={(minRating) => onCriteriaChange({ ...criteria, minRating })}
         />
         <NumberSliderField
@@ -529,6 +645,7 @@ function SearchScreen({
           max={10}
           step={0.1}
           suffix=" km"
+          isDarkMode={isDarkMode}
           onChange={(maxDistanceKm) =>
             onCriteriaChange({ ...criteria, maxDistanceKm })
           }
@@ -544,21 +661,27 @@ function SearchScreen({
           )}
           <Text style={styles.primaryButtonText}>Voir la liste</Text>
         </Pressable>
-        <Pressable style={styles.pickButton} onPress={onPick} disabled={loading}>
+        <Pressable
+          style={[styles.pickButton, isDarkMode && styles.darkSurface]}
+          onPress={onPick}
+          disabled={loading}
+        >
           <Sparkles size={20} color={colors.brand} />
         </Pressable>
       </View>
+      {searchError && <Text style={styles.searchErrorText}>{searchError}</Text>}
     </ScrollView>
   );
 }
 
+// Shows the ranked list or the single recommendation after a search.
 function ResultsScreen({
   criteria,
   results,
   topPick,
   decisionMode,
   favoriteIds,
-  onDecisionModeChange,
+  isDarkMode,
   onBack,
   onOpenDetail,
   onToggleFavorite
@@ -568,62 +691,51 @@ function ResultsScreen({
   topPick?: ScoredRestaurant;
   decisionMode: DecisionMode;
   favoriteIds: string[];
-  onDecisionModeChange: (mode: DecisionMode) => void;
+  isDarkMode: boolean;
   onBack: () => void;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
-    <View style={styles.flex}>
-      <Header title="Résultats" subtitle={criteria.locationLabel} onBack={onBack} />
-      <View style={styles.modeTabs}>
-        <Pressable
-          style={[styles.modeTab, decisionMode === "list" && styles.modeTabActive]}
-          onPress={() => onDecisionModeChange("list")}
-        >
-          <Text
-            style={[
-              styles.modeTabText,
-              decisionMode === "list" && styles.modeTabTextActive
-            ]}
-          >
-            Liste
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.modeTab, decisionMode === "pick" && styles.modeTabActive]}
-          onPress={() => onDecisionModeChange("pick")}
-        >
-          <Text
-            style={[
-              styles.modeTabText,
-              decisionMode === "pick" && styles.modeTabTextActive
-            ]}
-          >
-            Reco
-          </Text>
-        </Pressable>
-      </View>
-
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
+      <Header
+        title="Résultats"
+        subtitle={criteria.locationLabel}
+        isDarkMode={isDarkMode}
+        onBack={onBack}
+      />
       <ScrollView contentContainerStyle={styles.resultsContent}>
-        {decisionMode === "pick" && topPick ? (
+        {results.length === 0 ? (
+          <EmptyState
+            icon={<Search size={30} color={colors.brand} />}
+            title="Aucun restaurant ne correspond"
+            text="Essayez d'élargir la distance, de baisser la note minimale ou de retirer une contrainte."
+            actionLabel="Modifier les critères"
+            isDarkMode={isDarkMode}
+            onAction={onBack}
+          />
+        ) : decisionMode === "pick" && topPick ? (
           <View>
             <Text style={styles.kicker}>Meilleur choix maintenant</Text>
             <FeaturedRestaurantCard
               restaurant={topPick}
               isFavorite={favoriteIds.includes(topPick.id)}
+              isDarkMode={isDarkMode}
               onPress={onOpenDetail}
               onToggleFavorite={onToggleFavorite}
             />
           </View>
         ) : (
           <View style={styles.listGap}>
-            <Text style={styles.resultCount}>{results.length} adresses pertinentes</Text>
+            <Text style={[styles.resultCount, isDarkMode && styles.darkMutedText]}>
+              {results.length} adresses pertinentes
+            </Text>
             {results.map((restaurant) => (
               <RestaurantCard
                 key={restaurant.id}
                 restaurant={restaurant}
                 isFavorite={favoriteIds.includes(restaurant.id)}
+                isDarkMode={isDarkMode}
                 onPress={onOpenDetail}
                 onToggleFavorite={onToggleFavorite}
               />
@@ -635,16 +747,21 @@ function ResultsScreen({
   );
 }
 
+// Restaurant detail view with contact actions, food information and routing.
 function DetailScreen({
   restaurant,
+  criteria,
   isFavorite,
+  isDarkMode,
   onBack,
   onOpenRoute,
   onToggleFavorite,
   onShare
 }: {
   restaurant: ScoredRestaurant;
+  criteria: SearchCriteria;
   isFavorite: boolean;
+  isDarkMode: boolean;
   onBack: () => void;
   onOpenRoute: () => void;
   onToggleFavorite: () => void;
@@ -656,7 +773,18 @@ function DetailScreen({
   const unknownDiet = Object.entries(restaurant.dietary).filter(
     ([, status]) => status === "unknown"
   ) as [DietaryKey, string][];
+  const matchedCuisineCriteria =
+    criteria.cuisines.length > 0
+      ? restaurant.cuisines.filter((cuisine) =>
+          criteria.cuisines.some(
+            (selectedCuisine) =>
+              normalizeLabel(selectedCuisine) === normalizeLabel(cuisine)
+          )
+        )
+      : restaurant.cuisines;
+  const weeklyOpeningHours = getWeeklyOpeningHours(restaurant);
 
+  // Opens the native phone app with the restaurant number.
   async function callRestaurant(phoneNumber: string) {
     const callUrl = `tel:${phoneNumber.replace(/[^\d+]/g, "")}`;
     const supported = await Linking.canOpenURL(callUrl);
@@ -672,6 +800,7 @@ function DetailScreen({
     await Linking.openURL(callUrl);
   }
 
+  // Opens the restaurant website, adding a protocol when the API returns a bare domain.
   async function openWebsite(websiteUrl: string) {
     const normalizedUrl = websiteUrl.startsWith("http")
       ? websiteUrl
@@ -690,52 +819,149 @@ function DetailScreen({
   }
 
   return (
-    <View style={styles.flex}>
-      <Header title={restaurant.name} subtitle={restaurant.address} onBack={onBack} />
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
+      <Header
+        title={restaurant.name}
+        subtitle={restaurant.address}
+        isDarkMode={isDarkMode}
+        onBack={onBack}
+      />
       <ScrollView contentContainerStyle={styles.detailContent}>
         <Image source={{ uri: restaurant.photoUrl }} style={styles.detailImage} />
-        <View style={styles.detailStats}>
-          <Metric icon={<Star size={17} color={colors.gold} fill={colors.gold} />} text={`${restaurant.rating} (${restaurant.reviewCount})`} />
-          <Metric icon={<MapPin size={17} color={colors.coral} />} text={`${restaurant.distanceKm.toFixed(1)} km`} />
-          <Metric icon={<Clock3 size={17} color={colors.brand} />} text={restaurant.openNow ? `Ouvert · ${restaurant.closesAt}` : "Fermé"} />
+        <View style={[styles.detailStats, isDarkMode && styles.darkSurface]}>
+          <Metric
+            icon={<Star size={17} color={colors.gold} fill={colors.gold} />}
+            text={`${restaurant.rating} (${restaurant.reviewCount})`}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={<MapPin size={17} color={colors.coral} />}
+            text={`${restaurant.distanceKm.toFixed(1)} km`}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={<Clock3 size={17} color={colors.brand} />}
+            text={restaurant.openNow ? `Ouvert · ${restaurant.closesAt}` : "Fermé"}
+            isDarkMode={isDarkMode}
+          />
         </View>
 
-        <View style={styles.detailBlock}>
-          <Text style={styles.detailTitle}>Cuisine et budget</Text>
-          <Text style={styles.detailText}>
+        <View style={styles.hoursBlock}>
+          <View style={styles.hoursHeader}>
+            <Clock3 size={17} color={colors.brand} />
+            <Text style={[styles.hoursTitle, isDarkMode && styles.darkText]}>
+              Horaires d'ouverture
+            </Text>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.hoursScroller}
+          >
+            {weeklyOpeningHours.map((opening) => (
+              <View
+                key={opening.day}
+                style={[
+                  styles.hourCard,
+                  isDarkMode && styles.darkPanel,
+                  opening.closed && styles.hourCardClosed,
+                  isDarkMode && opening.closed && styles.darkClosedPanel
+                ]}
+              >
+                <Text style={[styles.hourDay, isDarkMode && styles.darkText]}>
+                  {opening.day}
+                </Text>
+                <Text
+                  style={[
+                    styles.hourText,
+                    isDarkMode && styles.darkReasonText,
+                    opening.closed && styles.hourTextClosed
+                  ]}
+                >
+                  {opening.hours}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        <Pressable
+          style={[styles.addressAction, isDarkMode && styles.darkSurfaceRaised]}
+          onPress={onOpenRoute}
+        >
+          <Map size={22} color={colors.coral} />
+          <Text
+            numberOfLines={2}
+            style={[styles.addressActionText, isDarkMode && styles.darkText]}
+          >
+            {restaurant.address}
+          </Text>
+          <ChevronRight size={20} color={isDarkMode ? "#AEB9AD" : colors.muted} />
+        </Pressable>
+
+        <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
+          <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>
+            Cuisine et budget
+          </Text>
+          <Text style={[styles.detailText, isDarkMode && styles.darkMutedText]}>
             {restaurant.cuisines.join(", ")} · {budgetLabels[restaurant.budget]} ·{" "}
             {restaurant.pricePerPerson}
           </Text>
+          <View style={styles.criteriaBlock}>
+            <View style={styles.reasonWrap}>
+              {matchedCuisineCriteria.map((cuisine) => (
+                <View
+                  key={cuisine}
+                  style={[
+                    styles.criteriaPill,
+                    isDarkMode && styles.darkCriteriaPill
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.criteriaPillText,
+                      isDarkMode && styles.darkCriteriaPillText
+                    ]}
+                  >
+                    {cuisine}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
           <View style={styles.reasonWrap}>
             {restaurant.matchReasons.map((reason) => (
-              <View key={reason} style={styles.reasonPill}>
+              <View key={reason} style={[styles.reasonPill, isDarkMode && styles.darkPanel]}>
                 <Check size={13} color={colors.brand} />
-                <Text style={styles.reasonText}>{reason}</Text>
+                <Text style={[styles.reasonText, isDarkMode && styles.darkReasonText]}>
+                  {reason}
+                </Text>
               </View>
             ))}
           </View>
         </View>
 
-        <View style={styles.detailBlock}>
-          <Text style={styles.detailTitle}>Informations alimentaires</Text>
+        <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
+          <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>
+            Informations alimentaires
+          </Text>
           <View style={styles.dietGrid}>
             {confirmedDiet.map(([diet]) => (
-              <View key={diet} style={styles.dietConfirmed}>
+              <View key={diet} style={[styles.dietConfirmed, isDarkMode && styles.darkPanel]}>
                 <ShieldCheck size={15} color={colors.success} />
                 <Text style={styles.dietConfirmedText}>{dietaryLabels[diet]}</Text>
               </View>
             ))}
             {unknownDiet.slice(0, 4).map(([diet]) => (
-              <View key={diet} style={styles.dietUnknown}>
+              <View key={diet} style={[styles.dietUnknown, isDarkMode && styles.darkPanel]}>
                 <Text style={styles.dietUnknownText}>{dietaryLabels[diet]} inconnu</Text>
               </View>
             ))}
           </View>
         </View>
 
-        <View style={styles.detailBlock}>
-          <Text style={styles.detailTitle}>Contact</Text>
-          <Text style={styles.detailText}>{restaurant.address}</Text>
+        <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
+          <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>Contact</Text>
           {restaurant.phone && (
             <Pressable
               style={styles.phoneLink}
@@ -756,11 +982,14 @@ function DetailScreen({
         </View>
       </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <Pressable style={styles.iconButton} onPress={onShare}>
+      <View style={[styles.bottomBar, isDarkMode && styles.darkBottomBar]}>
+        <Pressable style={[styles.iconButton, isDarkMode && styles.darkSurface]} onPress={onShare}>
           <Share2 size={21} color={colors.brand} />
         </Pressable>
-        <Pressable style={styles.iconButton} onPress={onToggleFavorite}>
+        <Pressable
+          style={[styles.iconButton, isDarkMode && styles.darkSurface]}
+          onPress={onToggleFavorite}
+        >
           <Heart
             size={21}
             color={isFavorite ? colors.coral : colors.brand}
@@ -776,35 +1005,48 @@ function DetailScreen({
   );
 }
 
+// Lets the user choose their preferred external navigation app.
 function RouteScreen({
   restaurant,
+  isDarkMode,
   onBack,
   onOpenRoute
 }: {
   restaurant: ScoredRestaurant;
+  isDarkMode: boolean;
   onBack: () => void;
   onOpenRoute: (app: NavigationApp) => void;
 }) {
   return (
-    <View style={styles.flex}>
-      <Header title="Itinéraire" subtitle={restaurant.name} onBack={onBack} />
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
+      <Header
+        title="Itinéraire"
+        subtitle={restaurant.name}
+        isDarkMode={isDarkMode}
+        onBack={onBack}
+      />
       <View style={styles.routeContent}>
         <MapPin size={34} color={colors.coral} />
-        <Text style={styles.routeTitle}>{restaurant.address}</Text>
+        <Text style={[styles.routeTitle, isDarkMode && styles.darkText]}>
+          {restaurant.address}
+        </Text>
         <View style={styles.routeOptions}>
-          <RouteOption
-            label="Google Maps"
-            icon={<Navigation size={22} color={colors.brand} />}
-            onPress={() => onOpenRoute("google")}
-          />
           <RouteOption
             label="Apple Plans"
             icon={<MapPin size={22} color={colors.blue} />}
+            isDarkMode={isDarkMode}
             onPress={() => onOpenRoute("apple")}
+          />
+          <RouteOption
+            label="Google Maps"
+            icon={<Navigation size={22} color={colors.brand} />}
+            isDarkMode={isDarkMode}
+            onPress={() => onOpenRoute("google")}
           />
           <RouteOption
             label="Waze"
             icon={<CarFront size={22} color={colors.coral} />}
+            isDarkMode={isDarkMode}
             onPress={() => onOpenRoute("waze")}
           />
         </View>
@@ -813,10 +1055,13 @@ function RouteScreen({
   );
 }
 
+// Map tab fed by the previous search. The visual map is a lightweight placeholder
+// until a native map provider is connected.
 function MapScreen({
   criteria,
   results,
   favoriteIds,
+  isDarkMode,
   onOpenDetail,
   onToggleFavorite,
   onGoSearch
@@ -824,6 +1069,7 @@ function MapScreen({
   criteria: SearchCriteria;
   results: ScoredRestaurant[];
   favoriteIds: string[];
+  isDarkMode: boolean;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
   onGoSearch: () => void;
@@ -831,10 +1077,10 @@ function MapScreen({
   const visibleResults = results.slice(0, 8);
 
   return (
-    <View style={styles.flex}>
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
       <View style={styles.tabHeader}>
-        <Text style={styles.tabTitle}>Carte</Text>
-        <Text style={styles.tabSubtitle}>
+        <Text style={[styles.tabTitle, isDarkMode && styles.darkText]}>Carte</Text>
+        <Text style={[styles.tabSubtitle, isDarkMode && styles.darkMutedText]}>
           {results.length > 0
             ? `${results.length} restaurants autour de ${criteria.locationLabel}`
             : "Lancez une recherche pour remplir la carte."}
@@ -847,15 +1093,26 @@ function MapScreen({
           title="Aucune recherche pour l'instant"
           text="La carte affichera les restaurants issus de votre dernière recherche."
           actionLabel="Faire une recherche"
+          isDarkMode={isDarkMode}
           onAction={onGoSearch}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.mapContent}>
-          <View style={styles.mapCanvas}>
-            <View style={styles.mapRoadHorizontal} />
-            <View style={styles.mapRoadVertical} />
-            <View style={styles.mapAreaOne} />
-            <View style={styles.mapAreaTwo} />
+          <View style={[styles.mapCanvas, isDarkMode && styles.darkMapCanvas]}>
+            <View
+              style={[
+                styles.mapRoadHorizontal,
+                isDarkMode && styles.darkMapRoad
+              ]}
+            />
+            <View
+              style={[
+                styles.mapRoadVertical,
+                isDarkMode && styles.darkMapRoad
+              ]}
+            />
+            <View style={[styles.mapAreaOne, isDarkMode && styles.darkMapAreaOne]} />
+            <View style={[styles.mapAreaTwo, isDarkMode && styles.darkMapAreaTwo]} />
             {visibleResults.map((restaurant, index) => (
               <Pressable
                 key={restaurant.id}
@@ -879,6 +1136,7 @@ function MapScreen({
                 key={restaurant.id}
                 restaurant={restaurant}
                 isFavorite={favoriteIds.includes(restaurant.id)}
+                isDarkMode={isDarkMode}
                 onPress={onOpenDetail}
                 onToggleFavorite={onToggleFavorite}
               />
@@ -890,26 +1148,28 @@ function MapScreen({
   );
 }
 
+// Favorites tab sorted by distance from the current user/search location.
 function FavoritesScreen({
   favorites,
-  favoriteSort,
-  onFavoriteSortChange,
+  isDarkMode,
   onOpenDetail,
   onToggleFavorite,
   onGoSearch
 }: {
   favorites: ScoredRestaurant[];
-  favoriteSort: FavoriteSort;
-  onFavoriteSortChange: (sort: FavoriteSort) => void;
+  isDarkMode: boolean;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
   onGoSearch: () => void;
 }) {
+  const [favoriteSort] = useState<FavoriteSort>("distance");
+  const onFavoriteSortChange = (_sort: FavoriteSort) => undefined;
+
   return (
-    <View style={styles.flex}>
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
       <View style={styles.tabHeader}>
-        <Text style={styles.tabTitle}>Favoris</Text>
-        <Text style={styles.tabSubtitle}>
+        <Text style={[styles.tabTitle, isDarkMode && styles.darkText]}>Favoris</Text>
+        <Text style={[styles.tabSubtitle, isDarkMode && styles.darkMutedText]}>
           {favorites.length > 0
             ? `${favorites.length} restaurants sauvegardés`
             : "Gardez vos meilleures adresses sous la main."}
@@ -922,14 +1182,17 @@ function FavoritesScreen({
           title="Aucun favori"
           text="Ajoutez des restaurants avec le cœur depuis les résultats ou une fiche."
           actionLabel="Explorer les restaurants"
+          isDarkMode={isDarkMode}
           onAction={onGoSearch}
         />
       ) : (
         <ScrollView contentContainerStyle={styles.resultsContent}>
-          <View style={styles.sortBar}>
+          <View style={styles.favoriteSortInfo}>
             <Pressable
               style={[
                 styles.sortButton,
+                isDarkMode && styles.darkSurface,
+                styles.hidden,
                 favoriteSort === "criteria" && styles.sortButtonActive
               ]}
               onPress={() => onFavoriteSortChange("criteria")}
@@ -941,6 +1204,7 @@ function FavoritesScreen({
               <Text
                 style={[
                   styles.sortButtonText,
+                  isDarkMode && styles.darkSortButtonText,
                   favoriteSort === "criteria" && styles.sortButtonTextActive
                 ]}
               >
@@ -950,6 +1214,7 @@ function FavoritesScreen({
             <Pressable
               style={[
                 styles.sortButton,
+                isDarkMode && styles.darkSurface,
                 favoriteSort === "distance" && styles.sortButtonActive
               ]}
               onPress={() => onFavoriteSortChange("distance")}
@@ -961,6 +1226,7 @@ function FavoritesScreen({
               <Text
                 style={[
                   styles.sortButtonText,
+                  isDarkMode && styles.darkSortButtonText,
                   favoriteSort === "distance" && styles.sortButtonTextActive
                 ]}
               >
@@ -975,6 +1241,7 @@ function FavoritesScreen({
                 key={restaurant.id}
                 restaurant={restaurant}
                 isFavorite
+                isDarkMode={isDarkMode}
                 onPress={onOpenDetail}
                 onToggleFavorite={onToggleFavorite}
               />
@@ -986,17 +1253,27 @@ function FavoritesScreen({
   );
 }
 
+// Profile tab for account entry points and saved preference settings.
 function ProfileScreen({
   criteria,
   favoriteCount,
-  resultsCount
+  resultsCount,
+  isDarkMode,
+  onDarkModeChange
 }: {
   criteria: SearchCriteria;
   favoriteCount: number;
   resultsCount: number;
+  isDarkMode: boolean;
+  onDarkModeChange: (enabled: boolean) => void;
 }) {
   return (
-    <ScrollView contentContainerStyle={styles.profileContent}>
+    <ScrollView
+      contentContainerStyle={[
+        styles.profileContent,
+        isDarkMode && styles.darkProfileContent
+      ]}
+    >
       <View style={styles.profileHero}>
         <View style={styles.profileAvatar}>
           <UserRound size={30} color={colors.surface} />
@@ -1004,76 +1281,133 @@ function ProfileScreen({
         <View style={styles.profileHeroCopy}>
           <Text style={styles.profileName}>Mode invité</Text>
           <Text style={styles.profileSubtext}>
-            Connectez-vous plus tard pour synchroniser vos favoris.
+            Connectez-vous pour synchroniser vos favoris.
           </Text>
         </View>
       </View>
 
-      <View style={styles.profileStats}>
-        <View style={styles.profileStat}>
-          <Text style={styles.profileStatValue}>{favoriteCount}</Text>
-          <Text style={styles.profileStatLabel}>favoris</Text>
-        </View>
-        <View style={styles.profileStat}>
-          <Text style={styles.profileStatValue}>{resultsCount}</Text>
-          <Text style={styles.profileStatLabel}>résultats</Text>
-        </View>
-        <View style={styles.profileStat}>
-          <Text style={styles.profileStatValue}>{budgetLabels[criteria.budget]}</Text>
-          <Text style={styles.profileStatLabel}>budget</Text>
-        </View>
+      <View style={styles.profileSection}>
+        <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
+          Connexion
+        </Text>
+        <ProfileRow
+          icon={<UserRound size={20} color={colors.brand} />}
+          label="Se connecter ou créer un compte"
+          isDarkMode={isDarkMode}
+        />
       </View>
 
       <View style={styles.profileSection}>
-        <Text style={styles.profileSectionTitle}>Connexion</Text>
-        <ProfileRow icon={<UserRound size={20} color={colors.brand} />} label="Se connecter ou créer un compte" />
-        <ProfileRow icon={<Heart size={20} color={colors.coral} />} label="Synchroniser les favoris" />
+        <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
+          Préférences
+        </Text>
+        <ProfileRow
+          icon={<ShieldCheck size={20} color={colors.success} />}
+          label="Régimes alimentaires"
+          isDarkMode={isDarkMode}
+        />
+        <ProfileRow
+          icon={<LocateFixed size={20} color={colors.coral} />}
+          label="Localisation et confidentialité"
+          isDarkMode={isDarkMode}
+        />
       </View>
 
       <View style={styles.profileSection}>
-        <Text style={styles.profileSectionTitle}>Préférences</Text>
-        <ProfileRow icon={<SlidersHorizontal size={20} color={colors.brand} />} label={`Budget par défaut ${budgetLabels[criteria.budget]}`} />
-        <ProfileRow icon={<ShieldCheck size={20} color={colors.success} />} label="Régimes alimentaires" />
-        <ProfileRow icon={<LocateFixed size={20} color={colors.coral} />} label="Localisation et confidentialité" />
-      </View>
-
-      <View style={styles.profileSection}>
-        <Text style={styles.profileSectionTitle}>Paramètres</Text>
-        <ProfileRow icon={<UserCog size={20} color={colors.blue} />} label="Notifications et langue" />
-        <ProfileRow icon={<Compass size={20} color={colors.brand} />} label="Applications d'itinéraire" />
+        <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
+          Paramètres
+        </Text>
+        <ProfileRow
+          icon={<Languages size={20} color={colors.blue} />}
+          label="Langue"
+          isDarkMode={isDarkMode}
+        />
+        <ProfileRow
+          icon={<UserCog size={20} color={colors.blue} />}
+          label="Notifications"
+          isDarkMode={isDarkMode}
+        />
+        <ThemeSwitchRow
+          isDarkMode={isDarkMode}
+          onDarkModeChange={onDarkModeChange}
+        />
       </View>
     </ScrollView>
   );
 }
 
-function ProfileRow({ icon, label }: { icon: React.ReactNode; label: string }) {
+// Reusable row used by the profile settings sections.
+function ProfileRow({
+  icon,
+  label,
+  isDarkMode
+}: {
+  icon: React.ReactNode;
+  label: string;
+  isDarkMode: boolean;
+}) {
   return (
-    <Pressable style={styles.profileRow}>
-      <View style={styles.profileRowIcon}>{icon}</View>
-      <Text style={styles.profileRowText}>{label}</Text>
-      <ChevronRight size={18} color={colors.muted} />
+    <Pressable style={[styles.profileRow, isDarkMode && styles.darkProfileCard]}>
+      <View style={[styles.profileRowIcon, isDarkMode && styles.darkProfileIcon]}>
+        {icon}
+      </View>
+      <Text style={[styles.profileRowText, isDarkMode && styles.darkText]}>
+        {label}
+      </Text>
+      <ChevronRight size={18} color={isDarkMode ? colors.line : colors.muted} />
     </Pressable>
   );
 }
 
+// Switch row dedicated to light/dark appearance in profile settings.
+function ThemeSwitchRow({
+  isDarkMode,
+  onDarkModeChange
+}: {
+  isDarkMode: boolean;
+  onDarkModeChange: (enabled: boolean) => void;
+}) {
+  return (
+    <View style={[styles.profileRow, isDarkMode && styles.darkProfileCard]}>
+      <View style={[styles.profileRowIcon, isDarkMode && styles.darkProfileIcon]}>
+        <Moon size={20} color={isDarkMode ? colors.gold : colors.blue} />
+      </View>
+      <View style={styles.themeSwitchCopy}>
+        <Text style={[styles.profileRowText, isDarkMode && styles.darkText]}>
+          Mode sombre
+        </Text>
+      </View>
+      <Switch
+        value={isDarkMode}
+        onValueChange={onDarkModeChange}
+        trackColor={{ false: colors.line, true: colors.brand }}
+        thumbColor={colors.surface}
+      />
+    </View>
+  );
+}
+
+// Generic empty state used by tabs that depend on prior user activity.
 function EmptyState({
   icon,
   title,
   text,
   actionLabel,
+  isDarkMode = false,
   onAction
 }: {
   icon: React.ReactNode;
   title: string;
   text: string;
   actionLabel: string;
+  isDarkMode?: boolean;
   onAction: () => void;
 }) {
   return (
     <View style={styles.emptyState}>
-      <View style={styles.emptyIcon}>{icon}</View>
-      <Text style={styles.emptyTitle}>{title}</Text>
-      <Text style={styles.emptyText}>{text}</Text>
+      <View style={[styles.emptyIcon, isDarkMode && styles.darkPanel]}>{icon}</View>
+      <Text style={[styles.emptyTitle, isDarkMode && styles.darkText]}>{title}</Text>
+      <Text style={[styles.emptyText, isDarkMode && styles.darkMutedText]}>{text}</Text>
       <Pressable style={styles.emptyButton} onPress={onAction}>
         <Text style={styles.emptyButtonText}>{actionLabel}</Text>
       </Pressable>
@@ -1081,11 +1415,14 @@ function EmptyState({
   );
 }
 
+// Bottom navigation between the four main app areas.
 function BottomTabs({
   activeTab,
+  isDarkMode,
   onTabChange
 }: {
   activeTab: MainTab;
+  isDarkMode: boolean;
   onTabChange: (tab: MainTab) => void;
 }) {
   const tabs: Array<{
@@ -1097,14 +1434,20 @@ function BottomTabs({
       id: "search",
       label: "Recherche",
       icon: (active) => (
-        <Search size={21} color={active ? colors.brand : colors.muted} />
+        <Search
+          size={21}
+          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+        />
       )
     },
     {
       id: "map",
       label: "Carte",
       icon: (active) => (
-        <Map size={21} color={active ? colors.brand : colors.muted} />
+        <Map
+          size={21}
+          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+        />
       )
     },
     {
@@ -1113,7 +1456,7 @@ function BottomTabs({
       icon: (active) => (
         <Heart
           size={21}
-          color={active ? colors.brand : colors.muted}
+          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
           fill={active ? colors.brand : "transparent"}
         />
       )
@@ -1122,13 +1465,16 @@ function BottomTabs({
       id: "profile",
       label: "Profil",
       icon: (active) => (
-        <UserRound size={21} color={active ? colors.brand : colors.muted} />
+        <UserRound
+          size={21}
+          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+        />
       )
     }
   ];
 
   return (
-    <View style={styles.bottomTabs}>
+    <View style={[styles.bottomTabs, isDarkMode && styles.darkBottomTabs]}>
       {tabs.map((tab) => {
         const active = activeTab === tab.id;
         return (
@@ -1138,7 +1484,13 @@ function BottomTabs({
             onPress={() => onTabChange(tab.id)}
           >
             {tab.icon(active)}
-            <Text style={[styles.bottomTabText, active && styles.bottomTabTextActive]}>
+            <Text
+              style={[
+                styles.bottomTabText,
+                isDarkMode && styles.darkMutedText,
+                active && styles.bottomTabTextActive
+              ]}
+            >
               {tab.label}
             </Text>
           </Pressable>
@@ -1148,63 +1500,161 @@ function BottomTabs({
   );
 }
 
+// Shared top header for secondary screens.
 function Header({
   title,
   subtitle,
+  isDarkMode = false,
   onBack
 }: {
   title: string;
   subtitle: string;
+  isDarkMode?: boolean;
   onBack: () => void;
 }) {
   return (
-    <View style={styles.header}>
-      <Pressable style={styles.backButton} onPress={onBack}>
-        <ArrowLeft size={22} color={colors.ink} />
+    <View style={[styles.header, isDarkMode && styles.darkHeader]}>
+      <Pressable style={[styles.backButton, isDarkMode && styles.darkSurface]} onPress={onBack}>
+        <ArrowLeft size={22} color={isDarkMode ? "#F3F6EF" : colors.ink} />
       </Pressable>
       <View style={styles.headerCopy}>
-        <Text numberOfLines={1} style={styles.headerTitle}>
+        <Text numberOfLines={1} style={[styles.headerTitle, isDarkMode && styles.darkText]}>
           {title}
         </Text>
-        <Text numberOfLines={1} style={styles.headerSubtitle}>
+        <Text
+          numberOfLines={1}
+          style={[styles.headerSubtitle, isDarkMode && styles.darkMutedText]}
+        >
           {subtitle}
         </Text>
-      </View>
-      <View style={styles.headerAvatar}>
-        <UserRound size={19} color={colors.brand} />
       </View>
     </View>
   );
 }
 
+// Toggle pill used for context, cuisine and dietary filters.
 function Chip({
   label,
   active,
+  isDarkMode,
   onPress
 }: {
   label: string;
   active: boolean;
+  isDarkMode: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable style={[styles.chip, active && styles.chipActive]} onPress={onPress}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    <Pressable
+      style={[
+        styles.chip,
+        isDarkMode && styles.darkChip,
+        active && styles.chipActive,
+        isDarkMode && active && styles.darkChipActive
+      ]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.chipText,
+          isDarkMode && styles.darkChipText,
+          active && styles.chipTextActive,
+          isDarkMode && active && styles.darkChipTextActive
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
 
+// Restricts numeric values to the allowed filter range.
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+// Keeps slider and typed values aligned on the configured increment.
 function roundToStep(value: number, step: number) {
   return Math.round(value / step) * step;
 }
 
+// Avoids showing unnecessary decimals in number inputs and slider bounds.
 function formatDecimal(value: number) {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
+// Normalizes labels before comparing cuisine criteria with restaurant tags.
+function normalizeLabel(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+// Returns the best available user/search location for distance-based sorting.
+function getCurrentSearchCoordinates(criteria: SearchCriteria): Coordinates | undefined {
+  if (criteria.coordinates) return criteria.coordinates;
+
+  const normalizedLocation = normalizeLabel(criteria.locationLabel);
+  if (normalizedLocation.includes("toulouse")) {
+    return { latitude: 43.6047, longitude: 1.4442 };
+  }
+  if (normalizedLocation.includes("marseille")) {
+    return { latitude: 43.2965, longitude: 5.3698 };
+  }
+  if (normalizedLocation.includes("paris")) {
+    return { latitude: 48.8566, longitude: 2.3522 };
+  }
+
+  return undefined;
+}
+
+// Calculates distance in kilometers between two coordinates with Haversine.
+function calculateDistanceKm(from: Coordinates, to: Coordinates) {
+  const earthRadiusKm = 6371;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const deltaLat = toRadians(to.latitude - from.latitude);
+  const deltaLng = toRadians(to.longitude - from.longitude);
+  const startLat = toRadians(from.latitude);
+  const endLat = toRadians(to.latitude);
+  const a =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(startLat) * Math.cos(endLat) * Math.sin(deltaLng / 2) ** 2;
+
+  return Math.round(earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+}
+
+// Builds a full-week schedule when the data source only provides "open now".
+function getWeeklyOpeningHours(restaurant: ScoredRestaurant): WeeklyOpeningHour[] {
+  if (restaurant.weeklyHours?.length) return restaurant.weeklyHours;
+
+  const days = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+  const isClosedNow = normalizeLabel(restaurant.closesAt).includes("ferme");
+  const defaultClose = isClosedNow ? "22:00" : restaurant.closesAt;
+  const isBrunch = restaurant.categories.includes("brunch");
+  const isLate = restaurant.categories.includes("late");
+
+  return days.map((day, index) => {
+    if (isBrunch) {
+      return {
+        day,
+        hours: index < 5 ? "09:00 - 16:00" : "10:00 - 17:00"
+      };
+    }
+
+    if (index === 6 && !isLate) {
+      return { day, hours: "Fermé", closed: true };
+    }
+
+    return {
+      day,
+      hours: `${index === 5 ? "12:00" : "11:30"} - ${defaultClose}`
+    };
+  });
+}
+
+// Hybrid number control: users can either drag the slider or type a value.
 function NumberSliderField({
   icon,
   label,
@@ -1213,6 +1663,7 @@ function NumberSliderField({
   max,
   step,
   suffix,
+  isDarkMode,
   onChange
 }: {
   icon: React.ReactNode;
@@ -1222,6 +1673,7 @@ function NumberSliderField({
   max: number;
   step: number;
   suffix: string;
+  isDarkMode: boolean;
   onChange: (value: number) => void;
 }) {
   const [trackWidth, setTrackWidth] = useState(1);
@@ -1246,6 +1698,7 @@ function NumberSliderField({
     stepRef.current = step;
   }, [onChange, trackWidth, min, max, step]);
 
+  // Validates typed values and applies the same min/max rules as the slider.
   function commitValue(rawValue: string) {
     const parsed = Number(rawValue.replace(",", "."));
     if (!Number.isFinite(parsed)) {
@@ -1257,6 +1710,7 @@ function NumberSliderField({
     onChangeRef.current(Number(nextValue.toFixed(1)));
   }
 
+  // Centralizes slider clamping and rounding so drag and text input behave alike.
   function normalizeValue(rawValue: number) {
     return Number(
       roundToStep(
@@ -1266,6 +1720,7 @@ function NumberSliderField({
     );
   }
 
+  // Converts the initial touch position on the track into a filter value.
   function valueFromPosition(event: GestureResponderEvent) {
     const width = trackWidthRef.current;
     const x = clamp(event.nativeEvent.locationX, 0, width);
@@ -1300,9 +1755,9 @@ function NumberSliderField({
       <View style={styles.numberFieldHeader}>
         <View style={styles.iconLabel}>
           {icon}
-          <Text style={styles.filterLabel}>{label}</Text>
+          <Text style={[styles.filterLabel, isDarkMode && styles.darkText]}>{label}</Text>
         </View>
-        <View style={styles.numberInputWrap}>
+        <View style={[styles.numberInputWrap, isDarkMode && styles.darkNumberInputWrap]}>
           <TextInput
             value={draftValue}
             onChangeText={(text) => {
@@ -1312,9 +1767,11 @@ function NumberSliderField({
             onSubmitEditing={() => commitValue(draftValue)}
             keyboardType="decimal-pad"
             inputMode="decimal"
-            style={styles.numberInput}
+            style={[styles.numberInput, isDarkMode && styles.darkText]}
           />
-          <Text style={styles.numberSuffix}>{suffix}</Text>
+          <Text style={[styles.numberSuffix, isDarkMode && styles.darkMutedText]}>
+            {suffix}
+          </Text>
         </View>
       </View>
       <View
@@ -1326,21 +1783,22 @@ function NumberSliderField({
         }}
         {...panResponder.panHandlers}
       >
-        <View style={styles.sliderBase} />
+        <View style={[styles.sliderBase, isDarkMode && styles.darkSliderBase]} />
         <View style={[styles.sliderFill, { width: `${clamp(percent, 0, 100)}%` }]} />
         <View
           style={[
             styles.sliderThumb,
+            isDarkMode && styles.darkSliderThumb,
             { left: `${clamp(percent, 0, 100)}%` }
           ]}
         />
       </View>
       <View style={styles.sliderBounds}>
-        <Text style={styles.sliderBoundText}>
+        <Text style={[styles.sliderBoundText, isDarkMode && styles.darkMutedText]}>
           {formatDecimal(min)}
           {suffix}
         </Text>
-        <Text style={styles.sliderBoundText}>
+        <Text style={[styles.sliderBoundText, isDarkMode && styles.darkMutedText]}>
           {formatDecimal(max)}
           {suffix}
         </Text>
@@ -1349,27 +1807,36 @@ function NumberSliderField({
   );
 }
 
+// Compact restaurant card shared by results, map and favorites tabs.
 function RestaurantCard({
   restaurant,
   isFavorite,
+  isDarkMode,
   onPress,
   onToggleFavorite
 }: {
   restaurant: ScoredRestaurant;
   isFavorite: boolean;
+  isDarkMode: boolean;
   onPress: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
-    <Pressable style={styles.restaurantCard} onPress={() => onPress(restaurant)}>
+    <Pressable
+      style={[styles.restaurantCard, isDarkMode && styles.darkSurfaceRaised]}
+      onPress={() => onPress(restaurant)}
+    >
       <Image source={{ uri: restaurant.photoUrl }} style={styles.restaurantImage} />
       <View style={styles.restaurantCopy}>
         <View style={styles.cardTopline}>
-          <Text numberOfLines={1} style={styles.restaurantName}>
+          <Text
+            numberOfLines={1}
+            style={[styles.restaurantName, isDarkMode && styles.darkText]}
+          >
             {restaurant.name}
           </Text>
           <Pressable
-            style={styles.favoriteButton}
+            style={[styles.favoriteButton, isDarkMode && styles.darkPanel]}
             onPress={(event) => {
               event.stopPropagation();
               onToggleFavorite(restaurant.id);
@@ -1382,17 +1849,35 @@ function RestaurantCard({
             />
           </Pressable>
         </View>
-        <Text numberOfLines={1} style={styles.restaurantMeta}>
+        <Text
+          numberOfLines={1}
+          style={[styles.restaurantMeta, isDarkMode && styles.darkMutedText]}
+        >
           {restaurant.cuisines.slice(0, 2).join(", ")} · {budgetLabels[restaurant.budget]}
         </Text>
         <View style={styles.cardMetrics}>
-          <Metric icon={<Star size={14} color={colors.gold} fill={colors.gold} />} text={restaurant.rating.toFixed(1)} />
-          <Metric icon={<MapPin size={14} color={colors.coral} />} text={`${restaurant.distanceKm.toFixed(1)} km`} />
-          <Metric icon={<Clock3 size={14} color={colors.brand} />} text={restaurant.openNow ? "Ouvert" : "Fermé"} />
+          <Metric
+            icon={<Star size={14} color={colors.gold} fill={colors.gold} />}
+            text={restaurant.rating.toFixed(1)}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={<MapPin size={14} color={colors.coral} />}
+            text={`${restaurant.distanceKm.toFixed(1)} km`}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={<Clock3 size={14} color={colors.brand} />}
+            text={restaurant.openNow ? "Ouvert" : "Fermé"}
+            isDarkMode={isDarkMode}
+          />
         </View>
         <View style={styles.reasonWrap}>
           {restaurant.matchReasons.slice(0, 2).map((reason) => (
-            <Text key={reason} style={styles.compactReason}>
+            <Text
+              key={reason}
+              style={[styles.compactReason, isDarkMode && styles.darkCompactReason]}
+            >
               {reason}
             </Text>
           ))}
@@ -1402,25 +1887,33 @@ function RestaurantCard({
   );
 }
 
+// Larger recommendation card used by the "Reco" decision mode.
 function FeaturedRestaurantCard({
   restaurant,
   isFavorite,
+  isDarkMode,
   onPress,
   onToggleFavorite
 }: {
   restaurant: ScoredRestaurant;
   isFavorite: boolean;
+  isDarkMode: boolean;
   onPress: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
-    <Pressable style={styles.featuredCard} onPress={() => onPress(restaurant)}>
+    <Pressable
+      style={[styles.featuredCard, isDarkMode && styles.darkSurfaceRaised]}
+      onPress={() => onPress(restaurant)}
+    >
       <Image source={{ uri: restaurant.photoUrl }} style={styles.featuredImage} />
       <View style={styles.featuredBody}>
         <View style={styles.featuredTitleRow}>
-          <Text style={styles.featuredName}>{restaurant.name}</Text>
+          <Text style={[styles.featuredName, isDarkMode && styles.darkText]}>
+            {restaurant.name}
+          </Text>
           <Pressable
-            style={styles.favoriteButtonLarge}
+            style={[styles.favoriteButtonLarge, isDarkMode && styles.darkPanel]}
             onPress={(event) => {
               event.stopPropagation();
               onToggleFavorite(restaurant.id);
@@ -1433,7 +1926,7 @@ function FeaturedRestaurantCard({
             />
           </Pressable>
         </View>
-        <Text style={styles.featuredMeta}>
+        <Text style={[styles.featuredMeta, isDarkMode && styles.darkMutedText]}>
           {restaurant.cuisines.join(", ")} · {budgetLabels[restaurant.budget]}
         </Text>
         <View style={styles.featuredScore}>
@@ -1442,9 +1935,11 @@ function FeaturedRestaurantCard({
         </View>
         <View style={styles.reasonWrap}>
           {restaurant.matchReasons.map((reason) => (
-            <View key={reason} style={styles.reasonPill}>
-              <Check size={13} color={colors.brand} />
-              <Text style={styles.reasonText}>{reason}</Text>
+              <View key={reason} style={[styles.reasonPill, isDarkMode && styles.darkPanel]}>
+                <Check size={13} color={colors.brand} />
+              <Text style={[styles.reasonText, isDarkMode && styles.darkReasonText]}>
+                {reason}
+              </Text>
             </View>
           ))}
         </View>
@@ -1453,29 +1948,48 @@ function FeaturedRestaurantCard({
   );
 }
 
-function Metric({ icon, text }: { icon: React.ReactNode; text: string }) {
+// Small icon/value pair for restaurant metadata.
+function Metric({
+  icon,
+  text,
+  isDarkMode = false
+}: {
+  icon: React.ReactNode;
+  text: string;
+  isDarkMode?: boolean;
+}) {
   return (
     <View style={styles.metric}>
       {icon}
-      <Text style={styles.metricText}>{text}</Text>
+      <Text style={[styles.metricText, isDarkMode && styles.darkText]}>{text}</Text>
     </View>
   );
 }
 
+// One tappable option in the external route picker.
 function RouteOption({
   label,
   icon,
+  isDarkMode,
   onPress
 }: {
   label: string;
   icon: React.ReactNode;
+  isDarkMode: boolean;
   onPress: () => void;
 }) {
   return (
-    <Pressable style={styles.routeOption} onPress={onPress}>
-      <View style={styles.routeOptionIcon}>{icon}</View>
-      <Text style={styles.routeOptionText}>{label}</Text>
-      <ChevronRight size={20} color={colors.muted} />
+    <Pressable
+      style={[styles.routeOption, isDarkMode && styles.darkSurfaceRaised]}
+      onPress={onPress}
+    >
+      <View style={[styles.routeOptionIcon, isDarkMode && styles.darkPanel]}>
+        {icon}
+      </View>
+      <Text style={[styles.routeOptionText, isDarkMode && styles.darkText]}>
+        {label}
+      </Text>
+      <ChevronRight size={20} color={isDarkMode ? "#AEB9AD" : colors.muted} />
     </Pressable>
   );
 }
@@ -1485,22 +1999,37 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background
   },
+  darkSafeArea: {
+    backgroundColor: "#111712"
+  },
   flex: {
     flex: 1,
     backgroundColor: colors.background
+  },
+  darkFlex: {
+    backgroundColor: "#111712"
   },
   tabShell: {
     flex: 1,
     backgroundColor: colors.background
   },
+  darkTabShell: {
+    backgroundColor: "#111712"
+  },
   tabContent: {
     flex: 1,
     paddingBottom: 78
+  },
+  darkTabContent: {
+    backgroundColor: "#111712"
   },
   screen: {
     padding: 20,
     paddingBottom: 34,
     gap: 18
+  },
+  darkScreen: {
+    backgroundColor: "#111712"
   },
   brandRow: {
     flexDirection: "row",
@@ -1767,6 +2296,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "900"
   },
+  searchErrorText: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: "900",
+    marginTop: -8
+  },
   pickButton: {
     width: 56,
     height: 56,
@@ -1999,6 +2534,90 @@ const styles = StyleSheet.create({
   reasonText: {
     color: colors.brandDark,
     fontSize: 12,
+    fontWeight: "800"
+  },
+  criteriaBlock: {
+    gap: 8
+  },
+  criteriaLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "900",
+    textTransform: "uppercase"
+  },
+  criteriaPill: {
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: colors.softCoral
+  },
+  criteriaPillText: {
+    color: colors.coral,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  hoursBlock: {
+    gap: 12
+  },
+  hoursHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 14
+  },
+  hoursTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  hoursScroller: {
+    paddingHorizontal: 0,
+    gap: 9
+  },
+  hourCard: {
+    width: 112,
+    minHeight: 72,
+    borderRadius: radii.md,
+    backgroundColor: colors.panel,
+    padding: 10,
+    justifyContent: "space-between"
+  },
+  hourCardClosed: {
+    backgroundColor: colors.softCoral,
+    borderColor: colors.softCoral
+  },
+  hourDay: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  hourText: {
+    color: colors.brandDark,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "800"
+  },
+  hourTextClosed: {
+    color: colors.coral
+  },
+  addressAction: {
+    minHeight: 70,
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    ...shadow
+  },
+  addressActionText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: "800"
   },
   detailContent: {
@@ -2291,6 +2910,14 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 14
   },
+  favoriteSortInfo: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 14
+  },
+  hidden: {
+    display: "none"
+  },
   sortButton: {
     flex: 1,
     height: 42,
@@ -2362,6 +2989,97 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 102,
     gap: 16
+  },
+  darkHeader: {
+    backgroundColor: "#111712",
+    borderBottomWidth: 1,
+    borderBottomColor: "#2C3A30"
+  },
+  darkBottomTabs: {
+    backgroundColor: "#172018",
+    borderTopColor: "#2C3A30"
+  },
+  darkBottomBar: {
+    backgroundColor: "#111712",
+    borderTopColor: "#2C3A30"
+  },
+  darkSurface: {
+    backgroundColor: "#1B241D",
+    borderColor: "#36503D"
+  },
+  darkSurfaceRaised: {
+    backgroundColor: "#1B241D",
+    borderColor: "#36503D"
+  },
+  darkPanel: {
+    backgroundColor: "#243328",
+    borderColor: "#4E6B55"
+  },
+  darkChip: {
+    backgroundColor: "#223127",
+    borderColor: "#5B7A62"
+  },
+  darkChipActive: {
+    backgroundColor: "#7BE495",
+    borderColor: "#A6F2B8"
+  },
+  darkChipText: {
+    color: "#F3F6EF"
+  },
+  darkChipTextActive: {
+    color: "#102016"
+  },
+  darkSegmentActive: {
+    backgroundColor: "#7BE495"
+  },
+  darkNumberInputWrap: {
+    backgroundColor: "#111712",
+    borderColor: "#4E6B55"
+  },
+  darkSliderBase: {
+    backgroundColor: "#36503D"
+  },
+  darkSliderThumb: {
+    backgroundColor: "#F3F6EF",
+    borderColor: "#7BE495"
+  },
+  darkCompactReason: {
+    color: "#D8FFE0",
+    backgroundColor: "#254733"
+  },
+  darkReasonText: {
+    color: "#D8FFE0"
+  },
+  darkCriteriaPill: {
+    backgroundColor: "#34261C",
+    borderWidth: 1,
+    borderColor: "#FFB39F"
+  },
+  darkCriteriaPillText: {
+    color: "#FFB39F"
+  },
+  darkClosedPanel: {
+    backgroundColor: "#3B2421",
+    borderColor: "#74443D"
+  },
+  darkMapCanvas: {
+    backgroundColor: "#172018",
+    borderColor: "#36503D"
+  },
+  darkMapRoad: {
+    backgroundColor: "#26362B"
+  },
+  darkMapAreaOne: {
+    backgroundColor: "#203A45"
+  },
+  darkMapAreaTwo: {
+    backgroundColor: "#3B2421"
+  },
+  darkSortButtonText: {
+    color: "#7BE495"
+  },
+  darkProfileContent: {
+    backgroundColor: "#111712"
   },
   profileHero: {
     flexDirection: "row",
@@ -2449,5 +3167,27 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: 14,
     fontWeight: "800"
+  },
+  themeSwitchCopy: {
+    flex: 1,
+    gap: 2
+  },
+  themeSwitchHint: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  darkProfileCard: {
+    backgroundColor: "#1B241D",
+    borderColor: "#2C3A30"
+  },
+  darkProfileIcon: {
+    backgroundColor: "#243328"
+  },
+  darkText: {
+    color: "#F3F6EF"
+  },
+  darkMutedText: {
+    color: "#AEB9AD"
   }
 });
