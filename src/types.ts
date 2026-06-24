@@ -37,7 +37,7 @@ export type SearchCriteria = {
   locationLabel: string;
   coordinates?: Coordinates;
   contexts: MealContext[];
-  budget: BudgetLevel | null;
+  budget: BudgetLevel[];
   cuisines: string[];
   dietary: DietaryKey[];
   minRating: number;

@@ -46,7 +46,12 @@ export function matchesSearchCriteria(
   if (criteria.openNowOnly && !restaurant.openNow) return false;
   if (restaurant.rating < criteria.minRating) return false;
   if (restaurant.distanceKm > criteria.maxDistanceKm) return false;
-  if (criteria.budget !== null && restaurant.budget !== criteria.budget) return false;
+  if (
+    criteria.budget.length > 0 &&
+    !criteria.budget.includes(restaurant.budget)
+  ) {
+    return false;
+  }
   if (!contextMatches(restaurant, criteria)) return false;
   if (!cuisinesMatch(restaurant, criteria)) return false;
   if (!dietaryMatches(restaurant, criteria)) return false;
@@ -82,12 +87,9 @@ export function scoreRestaurant(
 
   score += Math.min(12, Math.log10(restaurant.reviewCount + 1) * 4);
 
-  if (criteria.budget !== null) {
-    const budgetGap = Math.abs(restaurant.budget - criteria.budget);
-    score += budgetGap === 0 ? 14 : budgetGap === 1 ? 7 : -8;
-    if (budgetGap === 0) {
-      matchReasons.push(`Budget ${budgetLabels[restaurant.budget]}`);
-    }
+  if (criteria.budget.includes(restaurant.budget)) {
+    score += 14;
+    matchReasons.push(`Budget ${budgetLabels[restaurant.budget]}`);
   }
 
   const contextHits = criteria.contexts.filter((context) =>

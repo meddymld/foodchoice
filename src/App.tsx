@@ -3,6 +3,8 @@ import * as Location from "expo-location";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  ActionSheetIOS,
+  Animated,
   Alert,
   GestureResponderEvent,
   Image,
@@ -18,27 +20,32 @@ import {
   Switch,
   Text,
   TextInput,
+  TouchableOpacity,
   View
 } from "react-native";
 import {
+  ArrowDownAZ,
   ArrowLeft,
   Bookmark,
-  CarFront,
   Check,
   ChevronRight,
   Clock3,
   Compass,
+  Euro,
   Heart,
   Languages,
-  ListFilter,
+  Lightbulb,
   LocateFixed,
+  Lock,
   Map,
   MapPin,
+  Mail,
   Moon,
   Navigation,
   Phone,
   Search,
   Share2,
+  Send,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
@@ -118,21 +125,36 @@ const contextOptions: MealContext[] = [
   "travel"
 ];
 
+const contextEmojis: Record<MealContext, string> = {
+  quick: "⚡",
+  friends: "🥂",
+  date: "💘",
+  family: "👨‍👩‍👧",
+  solo: "🙋",
+  travel: "🧳"
+};
+
 const defaultCriteria: SearchCriteria = {
   locationLabel: "",
   contexts: [],
-  budget: null,
+  budget: [],
   cuisines: [],
   dietary: [],
-  minRating: 4,
+  minRating: 1,
   openNowOnly: true,
-  maxDistanceKm: 5
+  maxDistanceKm: 25,
 };
 
-type Screen = "search" | "results" | "detail" | "route";
+type Screen = "search" | "results" | "detail" | "auth";
 type DecisionMode = "list" | "pick";
 type MainTab = "search" | "map" | "favorites" | "profile";
-type FavoriteSort = "distance" | "criteria";
+type RestaurantSort = "distance" | "rating" | "name" | "price";
+type AuthMode = "signIn" | "signUp";
+type Account = {
+  name: string;
+  email: string;
+  provider: "email" | "google";
+};
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("search");
@@ -142,6 +164,10 @@ export default function App() {
   const [selected, setSelected] = useState<ScoredRestaurant | null>(null);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [account, setAccount] = useState<Account | null>(null);
+  const [registeredAccount, setRegisteredAccount] = useState<
+    (Account & { password: string }) | null
+  >(null);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>("list");
   const [searchError, setSearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -158,8 +184,10 @@ export default function App() {
   // Favorites are rebuilt from the full restaurant dataset so they are kept even
   // after changing city or launching a new search.
   const favorites = useMemo(
-    () =>
-      favoriteIds
+    () => {
+      if (!account) return [];
+
+      return favoriteIds
         .map((id) => {
           const currentResult = results.find((restaurant) => restaurant.id === id);
           const baseRestaurant =
@@ -176,8 +204,9 @@ export default function App() {
           };
         })
         .filter((restaurant): restaurant is ScoredRestaurant => restaurant !== null)
-        .sort((a, b) => a.distanceKm - b.distanceKm),
-    [criteria, currentLocation, favoriteIds, results]
+        .sort((a, b) => a.distanceKm - b.distanceKm);
+    },
+    [account, criteria, currentLocation, favoriteIds, results]
   );
 
   // Executes the main restaurant search after required fields are filled, then
@@ -274,6 +303,16 @@ export default function App() {
     }));
   }
 
+  // Adds or removes one budget level. With none selected, every budget is allowed.
+  function toggleBudget(budget: BudgetLevel) {
+    setCriteria((current) => ({
+      ...current,
+      budget: current.budget.includes(budget)
+        ? current.budget.filter((item) => item !== budget)
+        : [...current.budget, budget]
+    }));
+  }
+
   // Adds or removes a cuisine filter while preserving the rest of the criteria.
   function toggleCuisine(cuisine: string) {
     setCriteria((current) => ({
@@ -302,10 +341,126 @@ export default function App() {
 
   // Keeps favorites lightweight for the MVP by storing restaurant ids locally.
   function toggleFavorite(restaurantId: string) {
+    if (!account) {
+      Alert.alert(
+        "Connexion requise",
+        "Connectez-vous pour enregistrer vos restaurants favoris.",
+        [
+          { text: "Plus tard", style: "cancel" },
+          {
+            text: "Se connecter",
+            onPress: () => {
+              setActiveTab("profile");
+              setScreen("auth");
+            }
+          }
+        ]
+      );
+      return;
+    }
+
     setFavoriteIds((current) =>
       current.includes(restaurantId)
         ? current.filter((id) => id !== restaurantId)
         : [...current, restaurantId]
+    );
+  }
+
+  // Stores a prototype account in memory until a real authentication backend exists.
+  function submitCredentials({
+    mode,
+    name,
+    email,
+    password
+  }: {
+    mode: AuthMode;
+    name: string;
+    email: string;
+    password: string;
+  }) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (mode === "signUp") {
+      const nextAccount = {
+        name: name.trim(),
+        email: normalizedEmail,
+        provider: "email" as const
+      };
+      setRegisteredAccount({ ...nextAccount, password });
+      setAccount(nextAccount);
+      setScreen("search");
+      return null;
+    }
+
+    if (
+      !registeredAccount ||
+      registeredAccount.email !== normalizedEmail ||
+      registeredAccount.password !== password
+    ) {
+      return "Email ou mot de passe incorrect.";
+    }
+
+    setAccount({
+      name: registeredAccount.name,
+      email: registeredAccount.email,
+      provider: "email"
+    });
+    setScreen("search");
+    return null;
+  }
+
+  // Google is a local prototype session until OAuth client credentials are configured.
+  function signInWithGoogle() {
+    setAccount({
+      name: "Utilisateur Google",
+      email: "google.user@foodchoice.app",
+      provider: "google"
+    });
+    setScreen("search");
+  }
+
+  // Opens the platform-native navigation chooser from the address action.
+  function showNavigationOptions() {
+    if (!selected) return;
+
+    const navigationOptions: Array<{ label: string; app: NavigationApp }> =
+      Platform.OS === "ios"
+        ? [
+            { label: "Apple Plans", app: "apple" },
+            { label: "Google Maps", app: "google" },
+            { label: "Waze", app: "waze" }
+          ]
+        : [
+            { label: "Google Maps", app: "google" },
+            { label: "Waze", app: "waze" }
+          ];
+
+    if (Platform.OS === "ios") {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: "Itinéraire",
+          message: selected.address,
+          options: [...navigationOptions.map((option) => option.label), "Annuler"],
+          cancelButtonIndex: navigationOptions.length
+        },
+        (buttonIndex) => {
+          const option = navigationOptions[buttonIndex];
+          if (option) void openRoute(option.app);
+        }
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Itinéraire",
+      selected.address,
+      [
+        ...navigationOptions.map((option) => ({
+          text: option.label,
+          onPress: () => void openRoute(option.app)
+        })),
+        { text: "Annuler", style: "cancel" as const }
+      ]
     );
   }
 
@@ -315,22 +470,31 @@ export default function App() {
 
     const { latitude, longitude } = selected.coordinates;
     const encodedName = encodeURIComponent(selected.name);
+    const webMapUrl = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${encodedName}`;
     const urls: Record<NavigationApp, string> = {
-      google: `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${encodedName}`,
+      google:
+        Platform.OS === "android"
+          ? `google.navigation:q=${latitude},${longitude}`
+          : Platform.OS === "ios"
+            ? `comgooglemaps://?daddr=${latitude},${longitude}&directionsmode=driving`
+            : webMapUrl,
       apple:
         Platform.OS === "ios"
           ? `maps://?q=${encodedName}&ll=${latitude},${longitude}`
           : `https://maps.apple.com/?q=${encodedName}&ll=${latitude},${longitude}`,
+      waze:
+        Platform.OS === "web"
+          ? `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`
+          : `waze://?ll=${latitude},${longitude}&navigate=yes`
+    };
+    const fallbacks: Record<NavigationApp, string> = {
+      google: webMapUrl,
+      apple: `https://maps.apple.com/?q=${encodedName}&ll=${latitude},${longitude}`,
       waze: `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`
     };
 
     const supported = await Linking.canOpenURL(urls[app]);
-    if (!supported) {
-      Alert.alert("Application indisponible", "Essayez Google Maps ou Apple Plans.");
-      return;
-    }
-
-    await Linking.openURL(urls[app]);
+    await Linking.openURL(supported ? urls[app] : fallbacks[app]);
   }
 
   // Shares the selected restaurant through the native share sheet.
@@ -341,10 +505,30 @@ export default function App() {
     });
   }
 
+  function suggestImprovement() {
+    Alert.alert(
+      "Suggérer une amélioration",
+      "Merci pour votre idée. La collecte des suggestions sera connectée prochainement."
+    );
+  }
+
+  async function inviteFriend() {
+    await Share.share({
+      message: "Rejoins-moi sur foodchoice pour choisir où manger sans débat."
+    });
+  }
+
+  function rateFoodChoice() {
+    Alert.alert(
+      "Noter FoodChoice",
+      "La redirection vers l'App Store ou Google Play sera ajoutée avant la publication."
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.safeArea, isDarkMode && styles.darkSafeArea]}>
       <StatusBar style={isDarkMode ? "light" : "dark"} />
-      {screen !== "detail" && screen !== "route" && (
+      {screen !== "detail" && screen !== "auth" && (
         <View style={[styles.tabShell, isDarkMode && styles.darkTabShell]}>
           <View style={[styles.tabContent, isDarkMode && styles.darkTabContent]}>
             {activeTab === "search" && screen === "search" && (
@@ -357,6 +541,7 @@ export default function App() {
                 onCriteriaChange={updateCriteria}
                 onUseLocation={useCurrentLocation}
                 onToggleContext={toggleContext}
+                onToggleBudget={toggleBudget}
                 onToggleCuisine={toggleCuisine}
                 onToggleDiet={toggleDiet}
                 onSearch={() => runSearch("list")}
@@ -396,9 +581,14 @@ export default function App() {
             {activeTab === "favorites" && (
               <FavoritesScreen
                 favorites={favorites}
+                isAuthenticated={Boolean(account)}
                 isDarkMode={isDarkMode}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
+                onGoAuth={() => {
+                  setActiveTab("profile");
+                  setScreen("auth");
+                }}
                 onGoSearch={() => {
                   setActiveTab("search");
                   setScreen("search");
@@ -409,10 +599,16 @@ export default function App() {
             {activeTab === "profile" && (
               <ProfileScreen
                 criteria={criteria}
-                favoriteCount={favoriteIds.length}
+                favoriteCount={account ? favoriteIds.length : 0}
                 resultsCount={results.length}
+                account={account}
                 isDarkMode={isDarkMode}
                 onDarkModeChange={setIsDarkMode}
+                onOpenAuth={() => setScreen("auth")}
+                onSignOut={() => setAccount(null)}
+                onSuggestImprovement={suggestImprovement}
+                onInviteFriend={inviteFriend}
+                onRateFoodChoice={rateFoodChoice}
               />
             )}
           </View>
@@ -432,20 +628,21 @@ export default function App() {
           isFavorite={favoriteIds.includes(selected.id)}
           isDarkMode={isDarkMode}
           onBack={() => setScreen(activeTab === "search" ? "results" : "search")}
-          onOpenRoute={() => setScreen("route")}
+          onOpenRoute={showNavigationOptions}
           onToggleFavorite={() => toggleFavorite(selected.id)}
           onShare={shareRestaurant}
         />
       )}
 
-      {screen === "route" && selected && (
-        <RouteScreen
-          restaurant={selected}
+      {screen === "auth" && (
+        <AuthScreen
           isDarkMode={isDarkMode}
-          onBack={() => setScreen("detail")}
-          onOpenRoute={openRoute}
+          onBack={() => setScreen("search")}
+          onGoogleSignIn={signInWithGoogle}
+          onSubmitCredentials={submitCredentials}
         />
       )}
+
     </SafeAreaView>
   );
 }
@@ -460,6 +657,7 @@ function SearchScreen({
   onCriteriaChange,
   onUseLocation,
   onToggleContext,
+  onToggleBudget,
   onToggleCuisine,
   onToggleDiet,
   onSearch,
@@ -473,11 +671,20 @@ function SearchScreen({
   onCriteriaChange: (criteria: SearchCriteria) => void;
   onUseLocation: () => void;
   onToggleContext: (context: MealContext) => void;
+  onToggleBudget: (budget: BudgetLevel) => void;
   onToggleCuisine: (cuisine: string) => void;
   onToggleDiet: (diet: DietaryKey) => void;
   onSearch: () => void;
   onPick: () => void;
 }) {
+  const activeFilterCount =
+    criteria.contexts.length +
+    criteria.budget.length +
+    criteria.cuisines.length +
+    criteria.dietary.length +
+    Number(criteria.minRating !== defaultCriteria.minRating) +
+    Number(criteria.maxDistanceKm !== defaultCriteria.maxDistanceKm);
+
   return (
     <ScrollView
       contentContainerStyle={[styles.screen, isDarkMode && styles.darkScreen]}
@@ -531,7 +738,7 @@ function SearchScreen({
           {contextOptions.map((context) => (
             <Chip
               key={context}
-              label={contextLabels[context]}
+              label={`${contextEmojis[context]} ${contextLabels[context]}`}
               active={criteria.contexts.includes(context)}
               isDarkMode={isDarkMode}
               onPress={() => onToggleContext(context)}
@@ -542,37 +749,15 @@ function SearchScreen({
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Budget</Text>
-        <View style={[styles.segmented, isDarkMode && styles.darkSurface]}>
+        <View style={styles.gridChips}>
           {([1, 2, 3, 4] as BudgetLevel[]).map((budget) => (
-            <Pressable
+            <Chip
               key={budget}
-              style={[
-                styles.segment,
-                criteria.budget === budget && styles.segmentActive,
-                isDarkMode &&
-                  criteria.budget === budget &&
-                  styles.darkSegmentActive
-              ]}
-              onPress={() =>
-                onCriteriaChange({
-                  ...criteria,
-                  budget: criteria.budget === budget ? null : budget
-                })
-              }
-            >
-              <Text
-                style={[
-                  styles.segmentText,
-                  isDarkMode && styles.darkMutedText,
-                  criteria.budget === budget && styles.segmentTextActive,
-                  isDarkMode &&
-                    criteria.budget === budget &&
-                    styles.darkChipTextActive
-                ]}
-              >
-                {budgetLabels[budget]}
-              </Text>
-            </Pressable>
+              label={budgetLabels[budget]}
+              active={criteria.budget.includes(budget)}
+              isDarkMode={isDarkMode}
+              onPress={() => onToggleBudget(budget)}
+            />
           ))}
         </View>
       </View>
@@ -609,6 +794,12 @@ function SearchScreen({
         </View>
       </View>
 
+      <View style={styles.filtersHeading}>
+        <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Filtres</Text>
+        <View style={[styles.filterCountBadge, isDarkMode && styles.darkFilterCountBadge]}>
+          <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+        </View>
+      </View>
       <View style={[styles.filtersPanel, isDarkMode && styles.darkSurfaceRaised]}>
         <View style={styles.filterRow}>
           <View style={styles.iconLabel}>
@@ -642,7 +833,7 @@ function SearchScreen({
           label="Distance max."
           value={criteria.maxDistanceKm}
           min={1}
-          max={10}
+          max={25}
           step={0.1}
           suffix=" km"
           isDarkMode={isDarkMode}
@@ -696,6 +887,9 @@ function ResultsScreen({
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
 }) {
+  const [sort, setSort] = useState<RestaurantSort>("distance");
+  const sortedResults = useMemo(() => sortRestaurants(results, sort), [results, sort]);
+
   return (
     <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
       <Header
@@ -727,10 +921,11 @@ function ResultsScreen({
           </View>
         ) : (
           <View style={styles.listGap}>
+            <SortControls value={sort} isDarkMode={isDarkMode} onChange={setSort} />
             <Text style={[styles.resultCount, isDarkMode && styles.darkMutedText]}>
               {results.length} adresses pertinentes
             </Text>
-            {results.map((restaurant) => (
+            {sortedResults.map((restaurant) => (
               <RestaurantCard
                 key={restaurant.id}
                 restaurant={restaurant}
@@ -783,6 +978,7 @@ function DetailScreen({
         )
       : restaurant.cuisines;
   const weeklyOpeningHours = getWeeklyOpeningHours(restaurant);
+  const currentWeekday = getCurrentFrenchWeekday();
 
   // Opens the native phone app with the restaurant number.
   async function callRestaurant(phoneNumber: string) {
@@ -839,11 +1035,6 @@ function DetailScreen({
             text={`${restaurant.distanceKm.toFixed(1)} km`}
             isDarkMode={isDarkMode}
           />
-          <Metric
-            icon={<Clock3 size={17} color={colors.brand} />}
-            text={restaurant.openNow ? `Ouvert · ${restaurant.closesAt}` : "Fermé"}
-            isDarkMode={isDarkMode}
-          />
         </View>
 
         <View style={styles.hoursBlock}>
@@ -858,36 +1049,52 @@ function DetailScreen({
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.hoursScroller}
           >
-            {weeklyOpeningHours.map((opening) => (
-              <View
-                key={opening.day}
-                style={[
-                  styles.hourCard,
-                  isDarkMode && styles.darkPanel,
-                  opening.closed && styles.hourCardClosed,
-                  isDarkMode && opening.closed && styles.darkClosedPanel
-                ]}
-              >
-                <Text style={[styles.hourDay, isDarkMode && styles.darkText]}>
-                  {opening.day}
-                </Text>
-                <Text
+            {weeklyOpeningHours.map((opening) => {
+              const isCurrentDay = opening.day === currentWeekday;
+
+              return (
+                <View
+                  key={opening.day}
                   style={[
-                    styles.hourText,
-                    isDarkMode && styles.darkReasonText,
-                    opening.closed && styles.hourTextClosed
+                    styles.hourCard,
+                    isDarkMode && styles.darkPanel,
+                    opening.closed && styles.hourCardClosed,
+                    isDarkMode && opening.closed && styles.darkClosedPanel,
+                    isCurrentDay && styles.hourCardCurrent,
+                    isDarkMode && isCurrentDay && styles.darkHourCardCurrent
                   ]}
                 >
-                  {opening.hours}
-                </Text>
-              </View>
-            ))}
+                  <Text
+                    style={[
+                      styles.hourDay,
+                      isDarkMode && styles.darkText,
+                      isCurrentDay && styles.hourTextCurrent,
+                      isDarkMode && isCurrentDay && styles.darkHourTextCurrent
+                    ]}
+                  >
+                    {opening.day}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.hourText,
+                      isDarkMode && styles.darkReasonText,
+                      opening.closed && styles.hourTextClosed,
+                      isCurrentDay && styles.hourTextCurrent,
+                      isDarkMode && isCurrentDay && styles.darkHourTextCurrent
+                    ]}
+                  >
+                    {opening.hours}
+                  </Text>
+                </View>
+              );
+            })}
           </ScrollView>
         </View>
 
-        <Pressable
+        <TouchableOpacity
           style={[styles.addressAction, isDarkMode && styles.darkSurfaceRaised]}
           onPress={onOpenRoute}
+          activeOpacity={0.72}
         >
           <Map size={22} color={colors.coral} />
           <Text
@@ -897,7 +1104,7 @@ function DetailScreen({
             {restaurant.address}
           </Text>
           <ChevronRight size={20} color={isDarkMode ? "#AEB9AD" : colors.muted} />
-        </Pressable>
+        </TouchableOpacity>
 
         <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
           <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>
@@ -996,60 +1203,14 @@ function DetailScreen({
             fill={isFavorite ? colors.coral : "transparent"}
           />
         </Pressable>
-        <Pressable style={styles.routeButton} onPress={onOpenRoute}>
+        <TouchableOpacity
+          style={styles.routeButton}
+          onPress={onOpenRoute}
+          activeOpacity={0.8}
+        >
           <Navigation size={20} color={colors.surface} />
           <Text style={styles.routeButtonText}>Itinéraire</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-// Lets the user choose their preferred external navigation app.
-function RouteScreen({
-  restaurant,
-  isDarkMode,
-  onBack,
-  onOpenRoute
-}: {
-  restaurant: ScoredRestaurant;
-  isDarkMode: boolean;
-  onBack: () => void;
-  onOpenRoute: (app: NavigationApp) => void;
-}) {
-  return (
-    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
-      <Header
-        title="Itinéraire"
-        subtitle={restaurant.name}
-        isDarkMode={isDarkMode}
-        onBack={onBack}
-      />
-      <View style={styles.routeContent}>
-        <MapPin size={34} color={colors.coral} />
-        <Text style={[styles.routeTitle, isDarkMode && styles.darkText]}>
-          {restaurant.address}
-        </Text>
-        <View style={styles.routeOptions}>
-          <RouteOption
-            label="Apple Plans"
-            icon={<MapPin size={22} color={colors.blue} />}
-            isDarkMode={isDarkMode}
-            onPress={() => onOpenRoute("apple")}
-          />
-          <RouteOption
-            label="Google Maps"
-            icon={<Navigation size={22} color={colors.brand} />}
-            isDarkMode={isDarkMode}
-            onPress={() => onOpenRoute("google")}
-          />
-          <RouteOption
-            label="Waze"
-            icon={<CarFront size={22} color={colors.coral} />}
-            isDarkMode={isDarkMode}
-            onPress={() => onOpenRoute("waze")}
-          />
-        </View>
+        </TouchableOpacity>
       </View>
     </View>
   );
@@ -1090,7 +1251,7 @@ function MapScreen({
       {results.length === 0 ? (
         <EmptyState
           icon={<Map size={30} color={colors.brand} />}
-          title="Aucune recherche pour l'instant"
+          title="Aucune carte visible sans recherche"
           text="La carte affichera les restaurants issus de votre dernière recherche."
           actionLabel="Faire une recherche"
           isDarkMode={isDarkMode}
@@ -1151,19 +1312,26 @@ function MapScreen({
 // Favorites tab sorted by distance from the current user/search location.
 function FavoritesScreen({
   favorites,
+  isAuthenticated,
   isDarkMode,
   onOpenDetail,
   onToggleFavorite,
+  onGoAuth,
   onGoSearch
 }: {
   favorites: ScoredRestaurant[];
+  isAuthenticated: boolean;
   isDarkMode: boolean;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
+  onGoAuth: () => void;
   onGoSearch: () => void;
 }) {
-  const [favoriteSort] = useState<FavoriteSort>("distance");
-  const onFavoriteSortChange = (_sort: FavoriteSort) => undefined;
+  const [sort, setSort] = useState<RestaurantSort>("distance");
+  const sortedFavorites = useMemo(
+    () => sortRestaurants(favorites, sort),
+    [favorites, sort]
+  );
 
   return (
     <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
@@ -1176,7 +1344,16 @@ function FavoritesScreen({
         </Text>
       </View>
 
-      {favorites.length === 0 ? (
+      {!isAuthenticated ? (
+        <EmptyState
+          icon={<Heart size={30} color={colors.brand} />}
+          title="Connectez-vous pour vos favoris"
+          text="Enregistrez vos restaurants préférés et retrouvez-les dans votre profil."
+          actionLabel="Se connecter"
+          isDarkMode={isDarkMode}
+          onAction={onGoAuth}
+        />
+      ) : favorites.length === 0 ? (
         <EmptyState
           icon={<Bookmark size={30} color={colors.brand} />}
           title="Aucun favori"
@@ -1187,56 +1364,10 @@ function FavoritesScreen({
         />
       ) : (
         <ScrollView contentContainerStyle={styles.resultsContent}>
-          <View style={styles.favoriteSortInfo}>
-            <Pressable
-              style={[
-                styles.sortButton,
-                isDarkMode && styles.darkSurface,
-                styles.hidden,
-                favoriteSort === "criteria" && styles.sortButtonActive
-              ]}
-              onPress={() => onFavoriteSortChange("criteria")}
-            >
-              <ListFilter
-                size={16}
-                color={favoriteSort === "criteria" ? colors.surface : colors.brand}
-              />
-              <Text
-                style={[
-                  styles.sortButtonText,
-                  isDarkMode && styles.darkSortButtonText,
-                  favoriteSort === "criteria" && styles.sortButtonTextActive
-                ]}
-              >
-                Critères
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.sortButton,
-                isDarkMode && styles.darkSurface,
-                favoriteSort === "distance" && styles.sortButtonActive
-              ]}
-              onPress={() => onFavoriteSortChange("distance")}
-            >
-              <MapPin
-                size={16}
-                color={favoriteSort === "distance" ? colors.surface : colors.brand}
-              />
-              <Text
-                style={[
-                  styles.sortButtonText,
-                  isDarkMode && styles.darkSortButtonText,
-                  favoriteSort === "distance" && styles.sortButtonTextActive
-                ]}
-              >
-                Distance
-              </Text>
-            </Pressable>
-          </View>
+          <SortControls value={sort} isDarkMode={isDarkMode} onChange={setSort} />
 
           <View style={styles.listGap}>
-            {favorites.map((restaurant) => (
+            {sortedFavorites.map((restaurant) => (
               <RestaurantCard
                 key={restaurant.id}
                 restaurant={restaurant}
@@ -1258,14 +1389,26 @@ function ProfileScreen({
   criteria,
   favoriteCount,
   resultsCount,
+  account,
   isDarkMode,
-  onDarkModeChange
+  onDarkModeChange,
+  onOpenAuth,
+  onSignOut,
+  onSuggestImprovement,
+  onInviteFriend,
+  onRateFoodChoice
 }: {
   criteria: SearchCriteria;
   favoriteCount: number;
   resultsCount: number;
+  account: Account | null;
   isDarkMode: boolean;
   onDarkModeChange: (enabled: boolean) => void;
+  onOpenAuth: () => void;
+  onSignOut: () => void;
+  onSuggestImprovement: () => void;
+  onInviteFriend: () => void;
+  onRateFoodChoice: () => void;
 }) {
   return (
     <ScrollView
@@ -1274,14 +1417,16 @@ function ProfileScreen({
         isDarkMode && styles.darkProfileContent
       ]}
     >
-      <View style={styles.profileHero}>
+      <View style={[styles.profileHero, isDarkMode && styles.darkProfileHero]}>
         <View style={styles.profileAvatar}>
           <UserRound size={30} color={colors.surface} />
         </View>
         <View style={styles.profileHeroCopy}>
-          <Text style={styles.profileName}>Mode invité</Text>
-          <Text style={styles.profileSubtext}>
-            Connectez-vous pour synchroniser vos favoris.
+          <Text style={[styles.profileName, isDarkMode && styles.darkProfileName]}>
+            {account?.name ?? "Mode invité"}
+          </Text>
+          <Text style={[styles.profileSubtext, isDarkMode && styles.darkProfileSubtext]}>
+            {account?.email ?? "Connectez-vous pour synchroniser vos favoris."}
           </Text>
         </View>
       </View>
@@ -1292,8 +1437,9 @@ function ProfileScreen({
         </Text>
         <ProfileRow
           icon={<UserRound size={20} color={colors.brand} />}
-          label="Se connecter ou créer un compte"
+          label={account ? "Se déconnecter" : "Se connecter ou créer un compte"}
           isDarkMode={isDarkMode}
+          onPress={account ? onSignOut : onOpenAuth}
         />
       </View>
 
@@ -1303,7 +1449,7 @@ function ProfileScreen({
         </Text>
         <ProfileRow
           icon={<ShieldCheck size={20} color={colors.success} />}
-          label="Régimes alimentaires"
+          label="Mes préférences alimentaires"
           isDarkMode={isDarkMode}
         />
         <ProfileRow
@@ -1332,6 +1478,30 @@ function ProfileScreen({
           onDarkModeChange={onDarkModeChange}
         />
       </View>
+
+      <View style={styles.profileSection}>
+        <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
+          FoodChoice
+        </Text>
+        <ProfileRow
+          icon={<Lightbulb size={20} color={colors.gold} />}
+          label="Suggérer une amélioration"
+          isDarkMode={isDarkMode}
+          onPress={onSuggestImprovement}
+        />
+        <ProfileRow
+          icon={<Send size={20} color={colors.blue} />}
+          label="Inviter un ami"
+          isDarkMode={isDarkMode}
+          onPress={onInviteFriend}
+        />
+        <ProfileRow
+          icon={<Star size={20} color={colors.gold} fill={colors.gold} />}
+          label="Noter FoodChoice"
+          isDarkMode={isDarkMode}
+          onPress={onRateFoodChoice}
+        />
+      </View>
     </ScrollView>
   );
 }
@@ -1340,14 +1510,19 @@ function ProfileScreen({
 function ProfileRow({
   icon,
   label,
-  isDarkMode
+  isDarkMode,
+  onPress
 }: {
   icon: React.ReactNode;
   label: string;
   isDarkMode: boolean;
+  onPress?: () => void;
 }) {
   return (
-    <Pressable style={[styles.profileRow, isDarkMode && styles.darkProfileCard]}>
+    <Pressable
+      style={[styles.profileRow, isDarkMode && styles.darkProfileCard]}
+      onPress={onPress}
+    >
       <View style={[styles.profileRowIcon, isDarkMode && styles.darkProfileIcon]}>
         {icon}
       </View>
@@ -1383,6 +1558,173 @@ function ThemeSwitchRow({
         trackColor={{ false: colors.line, true: colors.brand }}
         thumbColor={colors.surface}
       />
+    </View>
+  );
+}
+
+// Authentication form for the local MVP account flow and the Google entry point.
+function AuthScreen({
+  isDarkMode,
+  onBack,
+  onGoogleSignIn,
+  onSubmitCredentials
+}: {
+  isDarkMode: boolean;
+  onBack: () => void;
+  onGoogleSignIn: () => void;
+  onSubmitCredentials: (payload: {
+    mode: AuthMode;
+    name: string;
+    email: string;
+    password: string;
+  }) => string | null;
+}) {
+  const [mode, setMode] = useState<AuthMode>("signIn");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const isSignUp = mode === "signUp";
+
+  function submit() {
+    if (isSignUp && name.trim().length < 2) {
+      setFormError("Indiquez votre prénom.");
+      return;
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+      setFormError("Indiquez une adresse email valide.");
+      return;
+    }
+    if (password.length < 6) {
+      setFormError("Le mot de passe doit contenir au moins 6 caractères.");
+      return;
+    }
+
+    setFormError(onSubmitCredentials({ mode, name, email, password }));
+  }
+
+  function toggleMode() {
+    setMode((current) => (current === "signIn" ? "signUp" : "signIn"));
+    setFormError(null);
+  }
+
+  return (
+    <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
+      <Header
+        title={isSignUp ? "Créer un compte" : "Connexion"}
+        subtitle="foodchoice"
+        isDarkMode={isDarkMode}
+        onBack={onBack}
+      />
+      <ScrollView
+        contentContainerStyle={[styles.authContent, isDarkMode && styles.darkScreen]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.authIntro}>
+          <Text style={[styles.authTitle, isDarkMode && styles.darkText]}>
+            {isSignUp ? "Vos bonnes adresses, à vous." : "Ravi de vous revoir."}
+          </Text>
+          <Text style={[styles.authDescription, isDarkMode && styles.darkMutedText]}>
+            {isSignUp
+              ? "Créez un compte pour retrouver vos favoris sur vos appareils."
+              : "Connectez-vous pour retrouver vos favoris et vos préférences."}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.googleButton, isDarkMode && styles.darkSurfaceRaised]}
+          onPress={onGoogleSignIn}
+          activeOpacity={0.72}
+        >
+          <View style={styles.googleMark}>
+            <Text style={styles.googleMarkText}>G</Text>
+          </View>
+          <Text style={[styles.googleButtonText, isDarkMode && styles.darkText]}>
+            Continuer avec Google
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.authDivider}>
+          <View style={[styles.authDividerLine, isDarkMode && styles.darkDividerLine]} />
+          <Text style={[styles.authDividerText, isDarkMode && styles.darkMutedText]}>ou</Text>
+          <View style={[styles.authDividerLine, isDarkMode && styles.darkDividerLine]} />
+        </View>
+
+        <View style={styles.authForm}>
+          {isSignUp && (
+            <View style={styles.authField}>
+              <Text style={[styles.authLabel, isDarkMode && styles.darkText]}>Prénom</Text>
+              <View style={[styles.authInputWrap, isDarkMode && styles.darkSurface]}>
+                <UserRound size={18} color={colors.muted} />
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Votre prénom"
+                  placeholderTextColor={colors.muted}
+                  style={[styles.authInput, isDarkMode && styles.darkText]}
+                  autoCapitalize="words"
+                  autoComplete="name"
+                />
+              </View>
+            </View>
+          )}
+
+          <View style={styles.authField}>
+            <Text style={[styles.authLabel, isDarkMode && styles.darkText]}>Email</Text>
+            <View style={[styles.authInputWrap, isDarkMode && styles.darkSurface]}>
+              <Mail size={18} color={colors.muted} />
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="vous@exemple.com"
+                placeholderTextColor={colors.muted}
+                style={[styles.authInput, isDarkMode && styles.darkText]}
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+              />
+            </View>
+          </View>
+
+          <View style={styles.authField}>
+            <Text style={[styles.authLabel, isDarkMode && styles.darkText]}>
+              Mot de passe
+            </Text>
+            <View style={[styles.authInputWrap, isDarkMode && styles.darkSurface]}>
+              <Lock size={18} color={colors.muted} />
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="6 caractères minimum"
+                placeholderTextColor={colors.muted}
+                style={[styles.authInput, isDarkMode && styles.darkText]}
+                autoCapitalize="none"
+                autoComplete={isSignUp ? "new-password" : "password"}
+                secureTextEntry
+              />
+            </View>
+          </View>
+        </View>
+
+        {formError && <Text style={styles.authError}>{formError}</Text>}
+
+        <TouchableOpacity style={styles.authSubmitButton} onPress={submit} activeOpacity={0.8}>
+          <Text style={styles.authSubmitText}>
+            {isSignUp ? "Créer mon compte" : "Se connecter"}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.authSwitchRow}>
+          <Text style={[styles.authSwitchText, isDarkMode && styles.darkMutedText]}>
+            {isSignUp ? "Déjà un compte ?" : "Pas de compte ?"}
+          </Text>
+          <TouchableOpacity onPress={toggleMode} activeOpacity={0.7}>
+            <Text style={styles.authSwitchAction}>
+              {isSignUp ? "Connectez-vous" : "Inscrivez-vous"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </View>
   );
 }
@@ -1425,6 +1767,8 @@ function BottomTabs({
   isDarkMode: boolean;
   onTabChange: (tab: MainTab) => void;
 }) {
+  const activeNavigationColor = isDarkMode ? "#7BE495" : colors.brand;
+  const inactiveNavigationColor = isDarkMode ? "#DDEDE3" : colors.muted;
   const tabs: Array<{
     id: MainTab;
     label: string;
@@ -1436,7 +1780,7 @@ function BottomTabs({
       icon: (active) => (
         <Search
           size={21}
-          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+          color={active ? activeNavigationColor : inactiveNavigationColor}
         />
       )
     },
@@ -1446,7 +1790,7 @@ function BottomTabs({
       icon: (active) => (
         <Map
           size={21}
-          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+          color={active ? activeNavigationColor : inactiveNavigationColor}
         />
       )
     },
@@ -1456,8 +1800,8 @@ function BottomTabs({
       icon: (active) => (
         <Heart
           size={21}
-          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
-          fill={active ? colors.brand : "transparent"}
+          color={active ? activeNavigationColor : inactiveNavigationColor}
+          fill={active ? activeNavigationColor : "transparent"}
         />
       )
     },
@@ -1467,14 +1811,195 @@ function BottomTabs({
       icon: (active) => (
         <UserRound
           size={21}
-          color={active ? colors.brand : isDarkMode ? "#AEB9AD" : colors.muted}
+          color={active ? activeNavigationColor : inactiveNavigationColor}
         />
       )
     }
   ];
+  const [barWidth, setBarWidth] = useState(0);
+  const activeIndicatorX = useRef(new Animated.Value(0)).current;
+  const activeIndicatorScale = useRef(new Animated.Value(1)).current;
+  const magnifierX = useRef(new Animated.Value(0)).current;
+  const magnifierOpacity = useRef(new Animated.Value(0)).current;
+  const magnifierScale = useRef(new Animated.Value(0.82)).current;
+  const tabWidth = Math.max(0, (barWidth - 16) / tabs.length);
+  const tabWidthRef = useRef(0);
+  const activeIndexRef = useRef(0);
+  const onTabChangeRef = useRef(onTabChange);
+  const dragStartX = useRef(0);
+  const activeIndex = tabs.findIndex((tab) => tab.id === activeTab);
+
+  useEffect(() => {
+    tabWidthRef.current = tabWidth;
+  }, [tabWidth]);
+
+  useEffect(() => {
+    activeIndexRef.current = activeIndex;
+    onTabChangeRef.current = onTabChange;
+
+    if (tabWidth <= 0) return;
+    Animated.spring(activeIndicatorX, {
+      toValue: activeIndex * tabWidth,
+      useNativeDriver: true,
+      stiffness: 220,
+      damping: 24,
+      mass: 0.7
+    }).start();
+    magnifierX.setValue(activeIndex * tabWidth);
+  }, [activeIndex, activeIndicatorX, magnifierX, onTabChange, tabWidth]);
+
+  function showMagnifier() {
+    Animated.parallel([
+      Animated.timing(magnifierOpacity, {
+        toValue: 1,
+        duration: 120,
+        useNativeDriver: true
+      }),
+      Animated.spring(magnifierScale, {
+        toValue: 1,
+        useNativeDriver: true,
+        stiffness: 280,
+        damping: 19
+      })
+    ]).start();
+  }
+
+  function hideMagnifier() {
+    Animated.parallel([
+      Animated.timing(magnifierOpacity, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true
+      }),
+      Animated.spring(magnifierScale, {
+        toValue: 0.82,
+        useNativeDriver: true,
+        stiffness: 240,
+        damping: 20
+      })
+    ]).start();
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_event, gesture) =>
+        Math.abs(gesture.dx) > 6 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onPanResponderGrant: () => {
+        dragStartX.current = activeIndexRef.current * tabWidthRef.current;
+        magnifierX.setValue(dragStartX.current);
+        showMagnifier();
+        Animated.spring(activeIndicatorScale, {
+          toValue: 1.04,
+          useNativeDriver: true,
+          stiffness: 240,
+          damping: 20
+        }).start();
+      },
+      onPanResponderMove: (_event, gesture) => {
+        const maxX = Math.max(0, (tabs.length - 1) * tabWidthRef.current);
+        const nextX = clamp(dragStartX.current + gesture.dx, 0, maxX);
+        activeIndicatorX.setValue(nextX);
+        magnifierX.setValue(nextX);
+      },
+      onPanResponderRelease: (_event, gesture) => {
+        const width = tabWidthRef.current;
+        if (width <= 0) return;
+
+        const maxIndex = tabs.length - 1;
+        const nextIndex = clamp(
+          Math.round((dragStartX.current + gesture.dx) / width),
+          0,
+          maxIndex
+        );
+        Animated.spring(activeIndicatorX, {
+          toValue: nextIndex * width,
+          useNativeDriver: true,
+          stiffness: 220,
+          damping: 24,
+          mass: 0.7
+        }).start();
+        Animated.spring(magnifierX, {
+          toValue: nextIndex * width,
+          useNativeDriver: true,
+          stiffness: 220,
+          damping: 24,
+          mass: 0.7
+        }).start();
+        onTabChangeRef.current(tabs[nextIndex].id);
+        Animated.spring(activeIndicatorScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          stiffness: 240,
+          damping: 20
+        }).start();
+        hideMagnifier();
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(activeIndicatorX, {
+          toValue: activeIndexRef.current * tabWidthRef.current,
+          useNativeDriver: true,
+          stiffness: 220,
+          damping: 24,
+          mass: 0.7
+        }).start();
+        Animated.spring(magnifierX, {
+          toValue: activeIndexRef.current * tabWidthRef.current,
+          useNativeDriver: true,
+          stiffness: 220,
+          damping: 24,
+          mass: 0.7
+        }).start();
+        Animated.spring(activeIndicatorScale, {
+          toValue: 1,
+          useNativeDriver: true,
+          stiffness: 240,
+          damping: 20
+        }).start();
+        hideMagnifier();
+      }
+    })
+  ).current;
 
   return (
-    <View style={[styles.bottomTabs, isDarkMode && styles.darkBottomTabs]}>
+    <View
+      style={[styles.bottomTabs, isDarkMode && styles.darkBottomTabs]}
+      onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
+      {...panResponder.panHandlers}
+    >
+      {tabWidth > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.bottomTabIndicator,
+            isDarkMode && styles.darkBottomTabIndicator,
+            {
+              width: tabWidth,
+              transform: [
+                { translateX: activeIndicatorX },
+                { scale: activeIndicatorScale }
+              ]
+            }
+          ]}
+        />
+      )}
+      {tabWidth > 0 && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.bottomTabMagnifier,
+            isDarkMode && styles.darkBottomTabMagnifier,
+            {
+              left: 8 + (tabWidth - 76) / 2,
+              opacity: magnifierOpacity,
+              transform: [
+                { translateX: magnifierX },
+                { scale: magnifierScale }
+              ]
+            }
+          ]}
+        />
+      )}
       {tabs.map((tab) => {
         const active = activeTab === tab.id;
         return (
@@ -1482,12 +2007,18 @@ function BottomTabs({
             key={tab.id}
             style={styles.bottomTab}
             onPress={() => onTabChange(tab.id)}
+            onPressIn={() => {
+              magnifierX.setValue(tabs.indexOf(tab) * tabWidth);
+              showMagnifier();
+            }}
+            onPressOut={hideMagnifier}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
           >
             {tab.icon(active)}
             <Text
               style={[
                 styles.bottomTabText,
-                isDarkMode && styles.darkMutedText,
                 active && styles.bottomTabTextActive
               ]}
             >
@@ -1568,6 +2099,81 @@ function Chip({
   );
 }
 
+// Compact sort control shared by restaurant results and saved favorites.
+function SortControls({
+  value,
+  isDarkMode,
+  onChange
+}: {
+  value: RestaurantSort;
+  isDarkMode: boolean;
+  onChange: (sort: RestaurantSort) => void;
+}) {
+  const options: Array<{
+    id: RestaurantSort;
+    label: string;
+    icon: (active: boolean) => React.ReactNode;
+  }> = [
+    {
+      id: "distance",
+      label: "Distance",
+      icon: (active) => <MapPin size={15} color={active ? colors.surface : colors.brand} />
+    },
+    {
+      id: "rating",
+      label: "Note",
+      icon: (active) => (
+        <Star size={15} color={active ? colors.surface : colors.gold} fill={active ? colors.surface : colors.gold} />
+      )
+    },
+    {
+      id: "name",
+      label: "Nom",
+      icon: (active) => <ArrowDownAZ size={15} color={active ? colors.surface : colors.brand} />
+    },
+    {
+      id: "price",
+      label: "Prix",
+      icon: (active) => <Euro size={15} color={active ? colors.surface : colors.brand} />
+    }
+  ];
+
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.sortControls}
+    >
+      {options.map((option) => {
+        const active = option.id === value;
+        return (
+          <TouchableOpacity
+            key={option.id}
+            style={[
+              styles.sortButton,
+              isDarkMode && styles.darkSurface,
+              active && styles.sortButtonActive
+            ]}
+            onPress={() => onChange(option.id)}
+            activeOpacity={0.72}
+          >
+            {option.icon(active)}
+            <Text
+              style={[
+                styles.sortButtonText,
+                isDarkMode && styles.darkSortButtonText,
+                active && styles.sortButtonTextActive
+              ]}
+            >
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 // Restricts numeric values to the allowed filter range.
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -1590,6 +2196,16 @@ function normalizeLabel(value: string) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+}
+
+// Produces a copy so changing the visible sort never mutates the ranked source list.
+function sortRestaurants(restaurants: ScoredRestaurant[], sort: RestaurantSort) {
+  return [...restaurants].sort((first, second) => {
+    if (sort === "distance") return first.distanceKm - second.distanceKm;
+    if (sort === "rating") return second.rating - first.rating;
+    if (sort === "name") return first.name.localeCompare(second.name, "fr");
+    return first.budget - second.budget;
+  });
 }
 
 // Returns the best available user/search location for distance-based sorting.
@@ -1652,6 +2268,11 @@ function getWeeklyOpeningHours(restaurant: ScoredRestaurant): WeeklyOpeningHour[
       hours: `${index === 5 ? "12:00" : "11:30"} - ${defaultClose}`
     };
   });
+}
+
+// Matches the short French weekday labels used by the restaurant schedules.
+function getCurrentFrenchWeekday() {
+  return ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][new Date().getDay()];
 }
 
 // Hybrid number control: users can either drag the slider or type a value.
@@ -1867,9 +2488,15 @@ function RestaurantCard({
             isDarkMode={isDarkMode}
           />
           <Metric
-            icon={<Clock3 size={14} color={colors.brand} />}
+            icon={
+              <Clock3
+                size={14}
+                color={restaurant.openNow ? colors.brand : colors.danger}
+              />
+            }
             text={restaurant.openNow ? "Ouvert" : "Fermé"}
             isDarkMode={isDarkMode}
+            isClosed={!restaurant.openNow}
           />
         </View>
         <View style={styles.reasonWrap}>
@@ -1952,45 +2579,27 @@ function FeaturedRestaurantCard({
 function Metric({
   icon,
   text,
-  isDarkMode = false
+  isDarkMode = false,
+  isClosed = false
 }: {
   icon: React.ReactNode;
   text: string;
   isDarkMode?: boolean;
+  isClosed?: boolean;
 }) {
   return (
     <View style={styles.metric}>
       {icon}
-      <Text style={[styles.metricText, isDarkMode && styles.darkText]}>{text}</Text>
-    </View>
-  );
-}
-
-// One tappable option in the external route picker.
-function RouteOption({
-  label,
-  icon,
-  isDarkMode,
-  onPress
-}: {
-  label: string;
-  icon: React.ReactNode;
-  isDarkMode: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      style={[styles.routeOption, isDarkMode && styles.darkSurfaceRaised]}
-      onPress={onPress}
-    >
-      <View style={[styles.routeOptionIcon, isDarkMode && styles.darkPanel]}>
-        {icon}
-      </View>
-      <Text style={[styles.routeOptionText, isDarkMode && styles.darkText]}>
-        {label}
+      <Text
+        style={[
+          styles.metricText,
+          isDarkMode && styles.darkText,
+          isClosed && styles.metricTextClosed
+        ]}
+      >
+        {text}
       </Text>
-      <ChevronRight size={20} color={isDarkMode ? "#AEB9AD" : colors.muted} />
-    </Pressable>
+    </View>
   );
 }
 
@@ -2018,7 +2627,7 @@ const styles = StyleSheet.create({
   },
   tabContent: {
     flex: 1,
-    paddingBottom: 78
+    paddingBottom: 110
   },
   darkTabContent: {
     backgroundColor: "#111712"
@@ -2104,8 +2713,8 @@ const styles = StyleSheet.create({
     gap: 9
   },
   chip: {
-    minHeight: 40,
-    paddingHorizontal: 14,
+    minHeight: 30,
+    paddingHorizontal: 10,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: colors.line,
@@ -2151,6 +2760,25 @@ const styles = StyleSheet.create({
   },
   segmentTextActive: {
     color: colors.coral
+  },
+  filtersHeading: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between"
+  },
+  filterCountBadge: {
+    minWidth: 28,
+    height: 28,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  filterCountText: {
+    color: colors.surface,
+    fontSize: 13,
+    fontWeight: "900"
   },
   filtersPanel: {
     backgroundColor: colors.surface,
@@ -2450,6 +3078,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800"
   },
+  metricTextClosed: {
+    color: colors.danger
+  },
   reasonWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2578,13 +3209,16 @@ const styles = StyleSheet.create({
     width: 112,
     minHeight: 72,
     borderRadius: radii.md,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.line,
     padding: 10,
     justifyContent: "space-between"
   },
   hourCardClosed: {
     backgroundColor: colors.softCoral,
     borderColor: colors.softCoral
+  },
+  hourCardCurrent: {
+    backgroundColor: colors.brand
   },
   hourDay: {
     color: colors.ink,
@@ -2599,6 +3233,9 @@ const styles = StyleSheet.create({
   },
   hourTextClosed: {
     color: colors.coral
+  },
+  hourTextCurrent: {
+    color: colors.surface
   },
   addressAction: {
     minHeight: 70,
@@ -2727,24 +3364,61 @@ const styles = StyleSheet.create({
   },
   bottomTabs: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: 76,
-    paddingTop: 8,
-    paddingBottom: 14,
-    paddingHorizontal: 10,
+    left: 16,
+    right: 16,
+    bottom: 16,
+    minHeight: 72,
+    padding: 8,
+    borderRadius: 32,
     backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
+    borderWidth: 1,
+    borderColor: colors.line,
     flexDirection: "row",
-    ...shadow
+    shadowColor: colors.ink,
+    shadowOpacity: 0.16,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 22,
+    elevation: 8
   },
   bottomTab: {
     flex: 1,
+    zIndex: 2,
     alignItems: "center",
     justifyContent: "center",
-    gap: 4
+    gap: 4,
+    borderRadius: 24,
+    minHeight: 56
+  },
+  bottomTabIndicator: {
+    position: "absolute",
+    left: 8,
+    top: 8,
+    bottom: 8,
+    borderRadius: 24,
+    backgroundColor: "#E2F1E8",
+    borderWidth: 1,
+    borderColor: "#C3DEC9",
+    shadowColor: colors.brand,
+    shadowOpacity: 0.14,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 2
+  },
+  bottomTabMagnifier: {
+    position: "absolute",
+    top: -2,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "rgba(255, 255, 255, 0.46)",
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 0.9)",
+    shadowColor: colors.ink,
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 4,
+    zIndex: 1
   },
   bottomTabText: {
     color: colors.muted,
@@ -2776,45 +3450,6 @@ const styles = StyleSheet.create({
   },
   routeButtonText: {
     color: colors.surface,
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  routeContent: {
-    flex: 1,
-    padding: 20,
-    gap: 18
-  },
-  routeTitle: {
-    color: colors.ink,
-    fontSize: 20,
-    lineHeight: 27,
-    fontWeight: "900"
-  },
-  routeOptions: {
-    gap: 12
-  },
-  routeOption: {
-    minHeight: 64,
-    borderRadius: radii.lg,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12
-  },
-  routeOptionIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: colors.panel,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  routeOptionText: {
-    flex: 1,
-    color: colors.ink,
     fontSize: 16,
     fontWeight: "900"
   },
@@ -2905,22 +3540,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900"
   },
-  sortBar: {
+  sortControls: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 14
-  },
-  favoriteSortInfo: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 14
-  },
-  hidden: {
-    display: "none"
+    gap: 8,
+    paddingBottom: 4
   },
   sortButton: {
-    flex: 1,
-    height: 42,
+    minHeight: 40,
+    paddingHorizontal: 12,
     borderRadius: radii.md,
     borderWidth: 1,
     borderColor: colors.line,
@@ -2985,6 +3612,137 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900"
   },
+  authContent: {
+    flexGrow: 1,
+    padding: 24,
+    paddingBottom: 40,
+    gap: 20
+  },
+  authIntro: {
+    gap: 8,
+    marginTop: 12
+  },
+  authTitle: {
+    color: colors.ink,
+    fontSize: 27,
+    lineHeight: 33,
+    fontWeight: "900"
+  },
+  authDescription: {
+    color: colors.muted,
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: "600"
+  },
+  googleButton: {
+    minHeight: 56,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10
+  },
+  googleMark: {
+    width: 25,
+    height: 25,
+    borderRadius: 13,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  googleMarkText: {
+    color: colors.coral,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  googleButtonText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900"
+  },
+  authDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  authDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.line
+  },
+  authDividerText: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  authForm: {
+    gap: 14
+  },
+  authField: {
+    gap: 7
+  },
+  authLabel: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  authInputWrap: {
+    minHeight: 54,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  authInput: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 16,
+    minHeight: 44
+  },
+  authError: {
+    color: colors.danger,
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: -8
+  },
+  authSubmitButton: {
+    minHeight: 56,
+    borderRadius: radii.md,
+    backgroundColor: colors.brand,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  authSubmitText: {
+    color: colors.surface,
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  authSwitchRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 4
+  },
+  authSwitchText: {
+    color: colors.muted,
+    fontSize: 14,
+    fontWeight: "700"
+  },
+  authSwitchAction: {
+    color: colors.brand,
+    fontSize: 14,
+    fontWeight: "900"
+  },
   profileContent: {
     padding: 20,
     paddingBottom: 102,
@@ -2996,8 +3754,20 @@ const styles = StyleSheet.create({
     borderBottomColor: "#2C3A30"
   },
   darkBottomTabs: {
-    backgroundColor: "#172018",
-    borderTopColor: "#2C3A30"
+    backgroundColor: "#14251C",
+    borderColor: "#36503D"
+  },
+  darkBottomTabIndicator: {
+    backgroundColor: "#29533D",
+    borderColor: "#4F8B68",
+    shadowColor: "#7BE495",
+    shadowOpacity: 0.2
+  },
+  darkBottomTabMagnifier: {
+    backgroundColor: "rgba(123, 228, 149, 0.18)",
+    borderColor: "rgba(164, 245, 183, 0.78)",
+    shadowColor: "#7BE495",
+    shadowOpacity: 0.3
   },
   darkBottomBar: {
     backgroundColor: "#111712",
@@ -3006,6 +3776,12 @@ const styles = StyleSheet.create({
   darkSurface: {
     backgroundColor: "#1B241D",
     borderColor: "#36503D"
+  },
+  darkDividerLine: {
+    backgroundColor: "#36503D"
+  },
+  darkFilterCountBadge: {
+    backgroundColor: "#7BE495"
   },
   darkSurfaceRaised: {
     backgroundColor: "#1B241D",
@@ -3062,6 +3838,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#3B2421",
     borderColor: "#74443D"
   },
+  darkHourCardCurrent: {
+    backgroundColor: "#7BE495"
+  },
+  darkHourTextCurrent: {
+    color: "#102016"
+  },
   darkMapCanvas: {
     backgroundColor: "#172018",
     borderColor: "#36503D"
@@ -3087,7 +3869,9 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 16,
     borderRadius: radii.lg,
-    backgroundColor: colors.ink
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line
   },
   profileAvatar: {
     width: 58,
@@ -3102,12 +3886,12 @@ const styles = StyleSheet.create({
     gap: 3
   },
   profileName: {
-    color: colors.surface,
+    color: colors.ink,
     fontSize: 20,
     fontWeight: "900"
   },
   profileSubtext: {
-    color: colors.line,
+    color: colors.muted,
     fontSize: 13,
     lineHeight: 19,
     fontWeight: "700"
@@ -3183,6 +3967,16 @@ const styles = StyleSheet.create({
   },
   darkProfileIcon: {
     backgroundColor: "#243328"
+  },
+  darkProfileHero: {
+    backgroundColor: "#1B241D",
+    borderColor: "#36503D"
+  },
+  darkProfileName: {
+    color: "#F3F6EF"
+  },
+  darkProfileSubtext: {
+    color: "#AEB9AD"
   },
   darkText: {
     color: "#F3F6EF"
