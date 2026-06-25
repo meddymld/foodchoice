@@ -1,5 +1,7 @@
 export type BudgetLevel = 1 | 2 | 3 | 4;
 
+export type RestaurantSort = "distance" | "rating" | "name" | "price";
+
 export type DietaryKey =
   | "halal"
   | "kosher"
