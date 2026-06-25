@@ -896,14 +896,49 @@ export const styles = StyleSheet.create({
     paddingBottom: 24,
     gap: 14
   },
+  mapFullScreenContent: {
+    flex: 1
+  },
   mapCanvas: {
-    height: 310,
+    height: 350,
     borderRadius: radii.lg,
     borderWidth: 1,
     borderColor: colors.line,
     backgroundColor: colors.panel,
     overflow: "hidden",
     ...shadow
+  },
+  mapCanvasFullScreen: {
+    flex: 1,
+    height: "auto",
+    borderRadius: 0,
+    borderWidth: 0,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0
+  },
+  nativeMap: {
+    flex: 1
+  },
+  mapDataBadge: {
+    position: "absolute",
+    top: 14,
+    left: 14,
+    zIndex: 4,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: "rgba(255, 255, 255, 0.92)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
+  },
+  mapDataBadgeText: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "900"
   },
   mapRoadHorizontal: {
     position: "absolute",
@@ -955,8 +990,160 @@ export const styles = StyleSheet.create({
     justifyContent: "center",
     ...shadow
   },
+  mapPinSelected: {
+    width: 42,
+    height: 42,
+    marginLeft: -21,
+    marginTop: -21,
+    borderRadius: 21,
+    backgroundColor: colors.brand,
+    borderColor: colors.surface
+  },
   mapPinText: {
     color: colors.surface,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  mapPinTextSelected: {
+    fontSize: 13
+  },
+  nativeMapPin: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.coral,
+    borderWidth: 3,
+    borderColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadow
+  },
+  nativeMapPinSelected: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.brand
+  },
+  mapPreviewCard: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 14,
+    zIndex: 5,
+    padding: 14,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
+    gap: 7,
+    ...shadow
+  },
+  mapPreviewTopline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  mapPreviewName: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900"
+  },
+  mapPreviewScore: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    minHeight: 26,
+    borderRadius: radii.sm,
+    backgroundColor: "#FFF4D8"
+  },
+  mapPreviewScoreText: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: "900"
+  },
+  mapPreviewMeta: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  mapPreviewAction: {
+    color: colors.brand,
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  mapRestaurantPreviewCard: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    bottom: 14,
+    zIndex: 6,
+    padding: 10,
+    minHeight: 128,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: "rgba(255, 255, 255, 0.97)",
+    flexDirection: "row",
+    gap: 12,
+    ...shadow
+  },
+  mapRestaurantPreviewImage: {
+    width: 96,
+    height: 108,
+    borderRadius: radii.md,
+    backgroundColor: colors.panel
+  },
+  mapRestaurantPreviewBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+    paddingVertical: 2
+  },
+  mapRestaurantPreviewTopline: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  mapRestaurantPreviewName: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "900"
+  },
+  mapRestaurantFavoriteButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.background,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  mapRestaurantPreviewMeta: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: "800"
+  },
+  mapRestaurantPreviewMetrics: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  mapRestaurantPreviewTags: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  mapRestaurantPreviewTag: {
+    overflow: "hidden",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: radii.sm,
+    backgroundColor: colors.panel,
+    color: colors.brandDark,
     fontSize: 12,
     fontWeight: "900"
   },

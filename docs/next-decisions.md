@@ -25,7 +25,7 @@ Parcours recommandé :
 3. sélectionner le contexte du repas ;
 4. sélectionner un budget ;
 5. sélectionner les envies culinaires et contraintes alimentaires ;
-6. consulter une liste courte de résultats pertinents ;
+6. consulter une liste courte de résultats pertinents (que ce soit en liste ou en carte);
 7. ouvrir une fiche restaurant ;
 8. lancer l'itinéraire dans Google Maps, Apple Plans ou Waze.
 

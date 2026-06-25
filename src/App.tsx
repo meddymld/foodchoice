@@ -19,6 +19,7 @@ import {
   View
 } from "react-native";
 import {
+  Apple,
   Bookmark,
   Check,
   ChevronRight,
@@ -82,9 +83,14 @@ import {
   Metric,
   RestaurantCard
 } from "./components/RestaurantCards";
+import {
+  NativeRestaurantMap,
+  supportsNativeRestaurantMap
+} from "./components/NativeRestaurantMap";
 import { EmptyState, Header } from "./components/ScreenChrome";
 import {
   calculateDistanceKm,
+  clamp,
   getCurrentFrenchWeekday,
   getCurrentSearchCoordinates,
   getWeeklyOpeningHours,
@@ -100,7 +106,7 @@ type AuthMode = "signIn" | "signUp";
 type Account = {
   name: string;
   email: string;
-  provider: "email" | "google";
+  provider: "email" | "google" | "apple";
 };
 
 export default function App() {
@@ -119,6 +125,7 @@ export default function App() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
+  const canSignInWithApple = Platform.OS === "ios" && !Platform.isPad;
 
   // Best match used by the recommendation mode.
   const topPick = useMemo(() => results[0], [results]);
@@ -375,6 +382,16 @@ export default function App() {
     setScreen("search");
   }
 
+  // Apple is available only on the iPhone app until Sign in with Apple is configured.
+  function signInWithApple() {
+    setAccount({
+      name: "Utilisateur Apple",
+      email: "apple.user@foodchoice.app",
+      provider: "apple"
+    });
+    setScreen("search");
+  }
+
   // Opens the platform-native navigation chooser from the address action.
   function showNavigationOptions() {
     if (!selected) return;
@@ -594,8 +611,10 @@ export default function App() {
       {screen === "auth" && (
         <AuthScreen
           isDarkMode={isDarkMode}
+          canSignInWithApple={canSignInWithApple}
           onBack={() => setScreen("search")}
           onGoogleSignIn={signInWithGoogle}
+          onAppleSignIn={signInWithApple}
           onSubmitCredentials={submitCredentials}
         />
       )}
@@ -1195,8 +1214,7 @@ function DetailScreen({
   );
 }
 
-// Map tab fed by the previous search. The visual map is a lightweight placeholder
-// until a native map provider is connected.
+// Onglet carte alimente par la derniere recherche, avec carte native mobile et fallback web.
 function MapScreen({
   criteria,
   results,
@@ -1214,18 +1232,97 @@ function MapScreen({
   onToggleFavorite: (restaurantId: string) => void;
   onGoSearch: () => void;
 }) {
-  const visibleResults = results.slice(0, 8);
+  const visibleResults = useMemo(() => results.slice(0, 8), [results]);
+  const [selectedMapRestaurantId, setSelectedMapRestaurantId] = useState<string | null>(
+    null
+  );
+  const selectedMapRestaurant = selectedMapRestaurantId
+    ? visibleResults.find((restaurant) => restaurant.id === selectedMapRestaurantId)
+    : null;
+  const hasNativeMap = supportsNativeRestaurantMap;
+
+  // Calcule les bornes geographiques des resultats pour centrer la carte native.
+  const mapBounds = useMemo(() => {
+    if (visibleResults.length === 0) {
+      return {
+        minLatitude: 0,
+        maxLatitude: 0,
+        minLongitude: 0,
+        maxLongitude: 0,
+        latitudeRange: 1,
+        longitudeRange: 1
+      };
+    }
+
+    const latitudes = visibleResults.map(
+      (restaurant) => restaurant.coordinates.latitude
+    );
+    const longitudes = visibleResults.map(
+      (restaurant) => restaurant.coordinates.longitude
+    );
+    const minLatitude = Math.min(...latitudes);
+    const maxLatitude = Math.max(...latitudes);
+    const minLongitude = Math.min(...longitudes);
+    const maxLongitude = Math.max(...longitudes);
+
+    return {
+      minLatitude,
+      maxLatitude,
+      minLongitude,
+      maxLongitude,
+      latitudeRange: Math.max(maxLatitude - minLatitude, 0.01),
+      longitudeRange: Math.max(maxLongitude - minLongitude, 0.01)
+    };
+  }, [visibleResults]);
+
+  // Region initiale donnee a react-native-maps pour cadrer tous les restaurants visibles.
+  const nativeMapRegion = useMemo(() => {
+    const latitude =
+      (mapBounds.minLatitude + mapBounds.maxLatitude) / 2 ||
+      criteria.coordinates?.latitude ||
+      visibleResults[0]?.coordinates.latitude ||
+      48.8566;
+    const longitude =
+      (mapBounds.minLongitude + mapBounds.maxLongitude) / 2 ||
+      criteria.coordinates?.longitude ||
+      visibleResults[0]?.coordinates.longitude ||
+      2.3522;
+
+    return {
+      latitude,
+      longitude,
+      latitudeDelta: Math.max(mapBounds.latitudeRange * 1.45, 0.025),
+      longitudeDelta: Math.max(mapBounds.longitudeRange * 1.45, 0.025)
+    };
+  }, [criteria.coordinates, mapBounds, visibleResults]);
+
+  // Projette les coordonnees GPS en pourcentages pour le fallback web dessine en React Native.
+  function getMapPosition(restaurant: ScoredRestaurant) {
+    const longitudePercent =
+      ((restaurant.coordinates.longitude - mapBounds.minLongitude) /
+        mapBounds.longitudeRange) *
+      100;
+    const latitudePercent =
+      ((mapBounds.maxLatitude - restaurant.coordinates.latitude) /
+        mapBounds.latitudeRange) *
+      100;
+
+    return {
+      left: clamp(10 + longitudePercent * 0.8, 12, 88),
+      top: clamp(10 + latitudePercent * 0.64, 14, 74)
+    };
+  }
 
   return (
     <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
-      <View style={styles.tabHeader}>
-        <Text style={[styles.tabTitle, isDarkMode && styles.darkText]}>Carte</Text>
-        <Text style={[styles.tabSubtitle, isDarkMode && styles.darkMutedText]}>
-          {results.length > 0
-            ? `${results.length} restaurants autour de ${criteria.locationLabel}`
-            : "Lancez une recherche pour remplir la carte."}
-        </Text>
-      </View>
+      {results.length === 0 && (
+        <View style={styles.tabHeader}>
+          <Text style={[styles.tabTitle, isDarkMode && styles.darkText]}>Carte</Text>
+          <Text style={[styles.tabSubtitle, isDarkMode && styles.darkMutedText]}>
+            Lancez une recherche pour remplir la carte.
+          </Text>
+        </View>
+      )}
 
       {results.length === 0 ? (
         <EmptyState
@@ -1237,54 +1334,171 @@ function MapScreen({
           onAction={onGoSearch}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.mapContent}>
-          <View style={[styles.mapCanvas, isDarkMode && styles.darkMapCanvas]}>
-            <View
-              style={[
-                styles.mapRoadHorizontal,
-                isDarkMode && styles.darkMapRoad
-              ]}
-            />
-            <View
-              style={[
-                styles.mapRoadVertical,
-                isDarkMode && styles.darkMapRoad
-              ]}
-            />
-            <View style={[styles.mapAreaOne, isDarkMode && styles.darkMapAreaOne]} />
-            <View style={[styles.mapAreaTwo, isDarkMode && styles.darkMapAreaTwo]} />
-            {visibleResults.map((restaurant, index) => (
-              <Pressable
-                key={restaurant.id}
-                style={[
-                  styles.mapPin,
-                  {
-                    left: `${18 + ((index * 23) % 66)}%`,
-                    top: `${16 + ((index * 31) % 62)}%`
-                  }
-                ]}
-                onPress={() => onOpenDetail(restaurant)}
-              >
-                <Text style={styles.mapPinText}>{index + 1}</Text>
-              </Pressable>
-            ))}
-          </View>
+        <View style={styles.mapFullScreenContent}>
+          <View
+            style={[
+              styles.mapCanvas,
+              styles.mapCanvasFullScreen,
+              isDarkMode && styles.darkMapCanvas
+            ]}
+          >
+            {hasNativeMap ? (
+              <NativeRestaurantMap
+                restaurants={visibleResults}
+                selectedRestaurantId={selectedMapRestaurant?.id}
+                initialRegion={nativeMapRegion}
+                onSelectRestaurant={setSelectedMapRestaurantId}
+              />
+            ) : (
+              <>
+                <View style={[styles.mapDataBadge, isDarkMode && styles.darkPanel]}>
+                  <MapPin size={14} color={colors.brand} />
+                  <Text style={[styles.mapDataBadgeText, isDarkMode && styles.darkText]}>
+                    Donnees factices
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.mapRoadHorizontal,
+                    isDarkMode && styles.darkMapRoad
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.mapRoadVertical,
+                    isDarkMode && styles.darkMapRoad
+                  ]}
+                />
+                <View style={[styles.mapAreaOne, isDarkMode && styles.darkMapAreaOne]} />
+                <View style={[styles.mapAreaTwo, isDarkMode && styles.darkMapAreaTwo]} />
+                {visibleResults.map((restaurant, index) => (
+                  <Pressable
+                    key={restaurant.id}
+                    style={[
+                      styles.mapPin,
+                      selectedMapRestaurant?.id === restaurant.id && styles.mapPinSelected,
+                      {
+                        left: `${getMapPosition(restaurant).left}%`,
+                        top: `${getMapPosition(restaurant).top}%`,
+                        zIndex: selectedMapRestaurant?.id === restaurant.id ? 3 : 2
+                      }
+                    ]}
+                    onPress={() => setSelectedMapRestaurantId(restaurant.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.mapPinText,
+                        selectedMapRestaurant?.id === restaurant.id &&
+                          styles.mapPinTextSelected
+                      ]}
+                    >
+                      {index + 1}
+                    </Text>
+                  </Pressable>
+                ))}
+              </>
+            )}
 
-          <View style={styles.listGap}>
-            {visibleResults.map((restaurant) => (
-              <RestaurantCard
-                key={restaurant.id}
-                restaurant={restaurant}
-                isFavorite={favoriteIds.includes(restaurant.id)}
+            {selectedMapRestaurant && (
+              <MapRestaurantPreview
+                restaurant={selectedMapRestaurant}
+                isFavorite={favoriteIds.includes(selectedMapRestaurant.id)}
                 isDarkMode={isDarkMode}
-                onPress={onOpenDetail}
+                onOpenDetail={onOpenDetail}
                 onToggleFavorite={onToggleFavorite}
               />
-            ))}
+            )}
           </View>
-        </ScrollView>
+        </View>
       )}
     </View>
+  );
+}
+
+// Miniature affichee sur la carte apres selection d'un pin.
+function MapRestaurantPreview({
+  restaurant,
+  isFavorite,
+  isDarkMode,
+  onOpenDetail,
+  onToggleFavorite
+}: {
+  restaurant: ScoredRestaurant;
+  isFavorite: boolean;
+  isDarkMode: boolean;
+  onOpenDetail: (restaurant: ScoredRestaurant) => void;
+  onToggleFavorite: (restaurantId: string) => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.mapRestaurantPreviewCard, isDarkMode && styles.darkSurfaceRaised]}
+      onPress={() => onOpenDetail(restaurant)}
+    >
+      <Image source={{ uri: restaurant.photoUrl }} style={styles.mapRestaurantPreviewImage} />
+      <View style={styles.mapRestaurantPreviewBody}>
+        <View style={styles.mapRestaurantPreviewTopline}>
+          <Text
+            numberOfLines={1}
+            style={[styles.mapRestaurantPreviewName, isDarkMode && styles.darkText]}
+          >
+            {restaurant.name}
+          </Text>
+          <Pressable
+            style={[styles.mapRestaurantFavoriteButton, isDarkMode && styles.darkPanel]}
+            onPress={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(restaurant.id);
+            }}
+          >
+            <Heart
+              size={18}
+              color={isFavorite ? colors.coral : colors.muted}
+              fill={isFavorite ? colors.coral : "transparent"}
+            />
+          </Pressable>
+        </View>
+
+        <Text
+          numberOfLines={1}
+          style={[styles.mapRestaurantPreviewMeta, isDarkMode && styles.darkMutedText]}
+        >
+          {restaurant.cuisines.slice(0, 2).join(", ")} · {budgetLabels[restaurant.budget]}
+        </Text>
+
+        <View style={styles.mapRestaurantPreviewMetrics}>
+          <Metric
+            icon={<Star size={14} color={colors.gold} fill={colors.gold} />}
+            text={restaurant.rating.toFixed(1)}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={<MapPin size={14} color={colors.coral} />}
+            text={`${restaurant.distanceKm.toFixed(1)} km`}
+            isDarkMode={isDarkMode}
+          />
+          <Metric
+            icon={
+              <Clock3
+                size={14}
+                color={restaurant.openNow ? colors.brand : colors.danger}
+              />
+            }
+            text={restaurant.openNow ? "Ouvert" : "Ferme"}
+            isDarkMode={isDarkMode}
+            isClosed={!restaurant.openNow}
+          />
+        </View>
+
+        <View style={styles.mapRestaurantPreviewTags}>
+          <Text style={[styles.mapRestaurantPreviewTag, isDarkMode && styles.darkCompactReason]}>
+            {restaurant.openNow ? "Ouvert maintenant" : "Ferme maintenant"}
+          </Text>
+          <Text style={[styles.mapRestaurantPreviewTag, isDarkMode && styles.darkCompactReason]}>
+            {restaurant.distanceKm <= 1 ? "Proche" : `${restaurant.distanceKm.toFixed(1)} km`}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -1541,16 +1755,20 @@ function ThemeSwitchRow({
   );
 }
 
-// Authentication form for the local MVP account flow and the Google entry point.
+// Authentication form for the local MVP account flow and social provider entry points.
 function AuthScreen({
   isDarkMode,
+  canSignInWithApple,
   onBack,
   onGoogleSignIn,
+  onAppleSignIn,
   onSubmitCredentials
 }: {
   isDarkMode: boolean;
+  canSignInWithApple: boolean;
   onBack: () => void;
   onGoogleSignIn: () => void;
+  onAppleSignIn: () => void;
   onSubmitCredentials: (payload: {
     mode: AuthMode;
     name: string;
@@ -1564,6 +1782,7 @@ function AuthScreen({
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const isSignUp = mode === "signUp";
+  const showEmailPasswordAuth = false;
 
   function submit() {
     if (isSignUp && name.trim().length < 2) {
@@ -1623,6 +1842,23 @@ function AuthScreen({
           </Text>
         </TouchableOpacity>
 
+        {canSignInWithApple && (
+          <TouchableOpacity
+            style={[styles.googleButton, isDarkMode && styles.darkSurfaceRaised]}
+            onPress={onAppleSignIn}
+            activeOpacity={0.72}
+          >
+            <View style={styles.googleMark}>
+              <Apple size={17} color={colors.ink} fill={colors.ink} />
+            </View>
+            <Text style={[styles.googleButtonText, isDarkMode && styles.darkText]}>
+              Continuer avec Apple
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {showEmailPasswordAuth && (
+          <>
         <View style={styles.authDivider}>
           <View style={[styles.authDividerLine, isDarkMode && styles.darkDividerLine]} />
           <Text style={[styles.authDividerText, isDarkMode && styles.darkMutedText]}>ou</Text>
@@ -1703,6 +1939,8 @@ function AuthScreen({
             </Text>
           </TouchableOpacity>
         </View>
+          </>
+        )}
       </ScrollView>
     </View>
   );

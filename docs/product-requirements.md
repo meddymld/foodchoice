@@ -48,6 +48,7 @@ Google Places est l'API prioritaire envisagée pour obtenir des données restaur
 - catégories ;
 - statut d'ouverture ;
 - niveau de prix lorsque disponible.
+- pages réseaux sociaux (insta, tiktok, facebook? ) lorsque disponible
 
 Le produit doit garder une architecture suffisamment flexible pour ajouter plus tard d'autres sources comme Yelp, OpenStreetMap, TripAdvisor, TheFork ou des données internes.
 
@@ -62,6 +63,8 @@ Le mode invité doit permettre les recherches essentielles. Le compte utilisateu
 
 ## Fonctionnalités principales du MVP
 
+
+
 ### Recherche
 
 L'utilisateur peut rechercher des restaurants :
@@ -69,6 +72,13 @@ L'utilisateur peut rechercher des restaurants :
 - autour de sa position actuelle ;
 - autour d'une adresse saisie ;
 - dans une ville ou un quartier précis.
+
+### Fonctionnalités supplémentaires
+
+L'utilisateur peut aussi créer sa liste de favoris:
+
+- possible lorsque le compte est crée
+- ajout soit par la fiche, par la liste ou clic sur la carte
 
 ### Filtres
 
@@ -186,6 +196,7 @@ Chaque restaurant doit avoir une fiche détaillée comprenant :
 - horaires ;
 - distance ;
 - téléphone ou site web lorsque disponible ;
+- instagram et tiktok si possible ;
 - bouton d'itinéraire ;
 - bouton de partage.
 
@@ -205,7 +216,6 @@ Elle peut être envisagée plus tard si le produit évolue vers une expérience 
 
 ## Fonctionnalités futures possibles
 
-- favoris ;
 - historique des restaurants consultés ;
 - recommandations personnalisées ;
 - préférences sauvegardées ;
@@ -216,6 +226,7 @@ Elle peut être envisagée plus tard si le produit évolue vers une expérience 
 - comptes restaurateurs ;
 - menus et prix détaillés ;
 - avis internes à foodchoice.
+- social pour les listes (ajout amis etc)
 
 ## Contraintes produit
 
