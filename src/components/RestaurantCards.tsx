@@ -5,7 +5,7 @@ import { Check, Clock3, Heart, MapPin, Sparkles, Star } from "lucide-react-nativ
 import { budgetLabels, colors } from "../theme";
 import { ScoredRestaurant } from "../types";
 import { styles } from "../styles/appStyles";
-// Compact restaurant card shared by results, map and favorites tabs.
+// Carte restaurant compacte partagee par les resultats, la carte et les favoris.
 export function RestaurantCard({
   restaurant,
   isFavorite,
@@ -91,7 +91,7 @@ export function RestaurantCard({
   );
 }
 
-// Larger recommendation card used by the "Reco" decision mode.
+// Grande carte de recommandation utilisee par le mode "Reco".
 export function FeaturedRestaurantCard({
   restaurant,
   isFavorite,
@@ -152,7 +152,7 @@ export function FeaturedRestaurantCard({
   );
 }
 
-// Small icon/value pair for restaurant metadata.
+// Petit duo icone/valeur pour les metadonnees restaurant.
 export function Metric({
   icon,
   text,

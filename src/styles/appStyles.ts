@@ -27,6 +27,9 @@ export const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: 110
   },
+  mapTabContent: {
+    paddingBottom: 0
+  },
   darkTabContent: {
     backgroundColor: "#111712"
   },

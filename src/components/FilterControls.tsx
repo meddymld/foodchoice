@@ -5,7 +5,7 @@ import { ArrowDownAZ, Euro, MapPin, Star } from "lucide-react-native";
 import { colors } from "../theme";
 import { RestaurantSort } from "../types";
 import { styles } from "../styles/appStyles";
-// Toggle pill used for context, cuisine and dietary filters.
+// Pastille activable utilisee pour les filtres de contexte, cuisine et regime.
 export function Chip({
   label,
   active,
@@ -41,7 +41,7 @@ export function Chip({
   );
 }
 
-// Compact sort control shared by restaurant results and saved favorites.
+// Controle de tri compact partage par les resultats et les favoris.
 export function SortControls({
   value,
   isDarkMode,

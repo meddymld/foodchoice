@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   ActionSheetIOS,
@@ -9,7 +9,6 @@ import {
   Linking,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   Share,
   Switch,
@@ -18,6 +17,11 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
+import {
+  SafeAreaProvider,
+  SafeAreaView,
+  useSafeAreaInsets
+} from "react-native-safe-area-context";
 import {
   Apple,
   Bookmark,
@@ -100,6 +104,11 @@ import {
 
 const provider = new MockRestaurantProvider();
 
+function isNightTime(date = new Date()) {
+  const hour = date.getHours();
+  return hour >= 20 || hour < 7;
+}
+
 type Screen = "search" | "results" | "detail" | "auth";
 type DecisionMode = "list" | "pick";
 type AuthMode = "signIn" | "signUp";
@@ -110,6 +119,15 @@ type Account = {
 };
 
 export default function App() {
+  return (
+    <SafeAreaProvider>
+      <FoodChoiceApp />
+    </SafeAreaProvider>
+  );
+}
+
+function FoodChoiceApp() {
+  const insets = useSafeAreaInsets();
   const [screen, setScreen] = useState<Screen>("search");
   const [activeTab, setActiveTab] = useState<MainTab>("search");
   const [criteria, setCriteria] = useState<SearchCriteria>(defaultCriteria);
@@ -125,9 +143,20 @@ export default function App() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [isMapNightMode, setIsMapNightMode] = useState(() => isNightTime());
   const canSignInWithApple = Platform.OS === "ios" && !Platform.isPad;
+  const isMapTab = screen !== "detail" && screen !== "auth" && activeTab === "map";
+  const chromeDarkMode = isMapTab ? isMapNightMode : isDarkMode;
 
-  // Best match used by the recommendation mode.
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setIsMapNightMode(isNightTime());
+    }, 60000);
+
+    return () => clearInterval(intervalId);
+  }, []);
+
+  // Meilleur resultat utilise par le mode recommandation.
   const topPick = useMemo(() => results[0], [results]);
 
   const currentLocation = useMemo(
@@ -135,8 +164,8 @@ export default function App() {
     [criteria]
   );
 
-  // Favorites are rebuilt from the full restaurant dataset so they are kept even
-  // after changing city or launching a new search.
+  // Les favoris sont reconstruits depuis tous les restaurants pour etre conserves
+  // meme apres un changement de ville ou une nouvelle recherche.
   const favorites = useMemo(
     () => {
       if (!account) return [];
@@ -163,8 +192,8 @@ export default function App() {
     [account, criteria, currentLocation, favoriteIds, results]
   );
 
-  // Executes the main restaurant search after required fields are filled, then
-  // ranks the provider results with the product scoring rules.
+  // Lance la recherche principale apres validation des champs requis, puis
+  // classe les resultats du fournisseur avec les regles de score produit.
   async function runSearch(mode: DecisionMode = decisionMode) {
     if (criteria.locationLabel.trim().length === 0) {
       setSearchError("Les champs requis ne sont pas remplis.");
@@ -227,8 +256,8 @@ export default function App() {
     }
   }
 
-  // In the mock app, the current-position shortcut fills a deterministic test
-  // location so the Toulouse dataset can be tested without real GPS.
+  // Dans le prototype, le raccourci de position actuelle utilise une adresse de
+  // test fixe pour verifier les donnees de Toulouse sans GPS reel.
   function useCurrentLocation() {
     setCriteria((current) => ({
       ...current,
@@ -241,13 +270,13 @@ export default function App() {
     setSearchError(null);
   }
 
-  // Updates criteria from the search form and clears validation once location exists.
+  // Met a jour les criteres depuis le formulaire et efface l'erreur si la ville existe.
   function updateCriteria(nextCriteria: SearchCriteria) {
     setCriteria(nextCriteria);
     if (nextCriteria.locationLabel.trim().length > 0) setSearchError(null);
   }
 
-  // Adds or removes a meal context. With no selected context, this filter is ignored.
+  // Ajoute ou retire un contexte de repas. Sans contexte choisi, le filtre est ignore.
   function toggleContext(context: MealContext) {
     setCriteria((current) => ({
       ...current,
@@ -257,7 +286,7 @@ export default function App() {
     }));
   }
 
-  // Adds or removes one budget level. With none selected, every budget is allowed.
+  // Ajoute ou retire un niveau de budget. Sans selection, tous les budgets sont autorises.
   function toggleBudget(budget: BudgetLevel) {
     setCriteria((current) => ({
       ...current,
@@ -267,7 +296,7 @@ export default function App() {
     }));
   }
 
-  // Adds or removes a cuisine filter while preserving the rest of the criteria.
+  // Ajoute ou retire une cuisine en conservant le reste des criteres.
   function toggleCuisine(cuisine: string) {
     setCriteria((current) => ({
       ...current,
@@ -277,7 +306,7 @@ export default function App() {
     }));
   }
 
-  // Adds or removes a dietary constraint from the search filters.
+  // Ajoute ou retire une contrainte alimentaire des filtres de recherche.
   function toggleDiet(diet: DietaryKey) {
     setCriteria((current) => ({
       ...current,
@@ -287,7 +316,7 @@ export default function App() {
     }));
   }
 
-  // Resets filter choices while preserving the user-entered search location.
+  // Reinitialise les filtres tout en gardant la ville saisie par l'utilisateur.
   function clearFilters() {
     setCriteria((current) => ({
       ...defaultCriteria,
@@ -296,13 +325,13 @@ export default function App() {
     }));
   }
 
-  // Opens the restaurant detail screen and stores the selected card context.
+  // Ouvre la fiche restaurant et memorise la carte selectionnee.
   function openDetail(restaurant: ScoredRestaurant) {
     setSelected(restaurant);
     setScreen("detail");
   }
 
-  // Keeps favorites lightweight for the MVP by storing restaurant ids locally.
+  // Garde les favoris legers pour le MVP en stockant seulement les identifiants.
   function toggleFavorite(restaurantId: string) {
     if (!account) {
       Alert.alert(
@@ -329,7 +358,7 @@ export default function App() {
     );
   }
 
-  // Stores a prototype account in memory until a real authentication backend exists.
+  // Stocke un compte prototype en memoire en attendant un vrai backend d'authentification.
   function submitCredentials({
     mode,
     name,
@@ -372,7 +401,7 @@ export default function App() {
     return null;
   }
 
-  // Google is a local prototype session until OAuth client credentials are configured.
+  // Google cree une session prototype locale tant que les identifiants OAuth ne sont pas configures.
   function signInWithGoogle() {
     setAccount({
       name: "Utilisateur Google",
@@ -382,7 +411,7 @@ export default function App() {
     setScreen("search");
   }
 
-  // Apple is available only on the iPhone app until Sign in with Apple is configured.
+  // Apple est disponible seulement sur iPhone tant que la connexion Apple n'est pas configuree.
   function signInWithApple() {
     setAccount({
       name: "Utilisateur Apple",
@@ -392,7 +421,7 @@ export default function App() {
     setScreen("search");
   }
 
-  // Opens the platform-native navigation chooser from the address action.
+  // Ouvre le choix de navigation natif depuis l'action d'adresse.
   function showNavigationOptions() {
     if (!selected) return;
 
@@ -437,7 +466,7 @@ export default function App() {
     );
   }
 
-  // Builds deep links for the supported navigation apps.
+  // Construit les liens profonds pour les apps de navigation prises en charge.
   async function openRoute(app: NavigationApp) {
     if (!selected) return;
 
@@ -470,7 +499,7 @@ export default function App() {
     await Linking.openURL(supported ? urls[app] : fallbacks[app]);
   }
 
-  // Shares the selected restaurant through the native share sheet.
+  // Partage le restaurant selectionne via la feuille de partage native.
   async function shareRestaurant() {
     if (!selected) return;
     await Share.share({
@@ -499,11 +528,26 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={[styles.safeArea, isDarkMode && styles.darkSafeArea]}>
-      <StatusBar style={isDarkMode ? "light" : "dark"} />
+    <SafeAreaView
+      edges={
+        screen === "detail" || screen === "auth"
+          ? ["top", "bottom"]
+          : activeTab === "map"
+            ? []
+            : ["top"]
+      }
+      style={[styles.safeArea, chromeDarkMode && styles.darkSafeArea]}
+    >
+      <StatusBar style={chromeDarkMode ? "light" : "dark"} />
       {screen !== "detail" && screen !== "auth" && (
-        <View style={[styles.tabShell, isDarkMode && styles.darkTabShell]}>
-          <View style={[styles.tabContent, isDarkMode && styles.darkTabContent]}>
+        <View style={[styles.tabShell, chromeDarkMode && styles.darkTabShell]}>
+          <View
+            style={[
+              styles.tabContent,
+              activeTab === "map" && styles.mapTabContent,
+              chromeDarkMode && styles.darkTabContent
+            ]}
+          >
             {activeTab === "search" && screen === "search" && (
               <SearchScreen
                 criteria={criteria}
@@ -542,7 +586,9 @@ export default function App() {
                 criteria={criteria}
                 results={results}
                 favoriteIds={favoriteIds}
-                isDarkMode={isDarkMode}
+                isDarkMode={isMapNightMode}
+                isNightMode={isMapNightMode}
+                bottomInset={insets.bottom}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
                 onGoSearch={() => {
@@ -589,7 +635,8 @@ export default function App() {
 
           <BottomTabs
             activeTab={activeTab}
-            isDarkMode={isDarkMode}
+            isDarkMode={activeTab === "map" ? isMapNightMode : isDarkMode}
+            bottomInset={insets.bottom}
             onTabChange={(tab) => setActiveTab(tab)}
           />
         </View>
@@ -623,7 +670,7 @@ export default function App() {
   );
 }
 
-// Main filter screen: location, context, budget, cuisines and constraints.
+// Ecran principal de filtres : lieu, contexte, budget, cuisines et contraintes.
 function SearchScreen({
   criteria,
   searchError,
@@ -863,7 +910,7 @@ function SearchScreen({
   );
 }
 
-// Shows the ranked list or the single recommendation after a search.
+// Affiche la liste classee ou la recommandation unique apres une recherche.
 function ResultsScreen({
   criteria,
   results,
@@ -940,7 +987,7 @@ function ResultsScreen({
   );
 }
 
-// Restaurant detail view with contact actions, food information and routing.
+// Fiche restaurant avec actions de contact, informations repas et itineraire.
 function DetailScreen({
   restaurant,
   criteria,
@@ -978,7 +1025,7 @@ function DetailScreen({
   const weeklyOpeningHours = getWeeklyOpeningHours(restaurant);
   const currentWeekday = getCurrentFrenchWeekday();
 
-  // Opens the native phone app with the restaurant number.
+  // Ouvre l'app telephone native avec le numero du restaurant.
   async function callRestaurant(phoneNumber: string) {
     const callUrl = `tel:${phoneNumber.replace(/[^\d+]/g, "")}`;
     const supported = await Linking.canOpenURL(callUrl);
@@ -994,7 +1041,7 @@ function DetailScreen({
     await Linking.openURL(callUrl);
   }
 
-  // Opens the restaurant website, adding a protocol when the API returns a bare domain.
+  // Ouvre le site du restaurant en ajoutant le protocole si l'API renvoie un domaine nu.
   async function openWebsite(websiteUrl: string) {
     const normalizedUrl = websiteUrl.startsWith("http")
       ? websiteUrl
@@ -1214,12 +1261,14 @@ function DetailScreen({
   );
 }
 
-// Onglet carte alimente par la derniere recherche, avec carte native mobile et fallback web.
+// Onglet carte alimente par la derniere recherche, avec carte native mobile et solution web de repli.
 function MapScreen({
   criteria,
   results,
   favoriteIds,
   isDarkMode,
+  isNightMode,
+  bottomInset,
   onOpenDetail,
   onToggleFavorite,
   onGoSearch
@@ -1228,6 +1277,8 @@ function MapScreen({
   results: ScoredRestaurant[];
   favoriteIds: string[];
   isDarkMode: boolean;
+  isNightMode: boolean;
+  bottomInset: number;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
   onGoSearch: () => void;
@@ -1240,6 +1291,8 @@ function MapScreen({
     ? visibleResults.find((restaurant) => restaurant.id === selectedMapRestaurantId)
     : null;
   const hasNativeMap = supportsNativeRestaurantMap;
+  const bottomNavigationOffset = Math.max(12, bottomInset + 8);
+  const previewBottomOffset = bottomNavigationOffset + 84;
 
   // Calcule les bornes geographiques des resultats pour centrer la carte native.
   const mapBounds = useMemo(() => {
@@ -1296,7 +1349,7 @@ function MapScreen({
     };
   }, [criteria.coordinates, mapBounds, visibleResults]);
 
-  // Projette les coordonnees GPS en pourcentages pour le fallback web dessine en React Native.
+  // Projette les coordonnees GPS en pourcentages pour la solution web de repli.
   function getMapPosition(restaurant: ScoredRestaurant) {
     const longitudePercent =
       ((restaurant.coordinates.longitude - mapBounds.minLongitude) /
@@ -1347,6 +1400,7 @@ function MapScreen({
                 restaurants={visibleResults}
                 selectedRestaurantId={selectedMapRestaurant?.id}
                 initialRegion={nativeMapRegion}
+                isNightMode={isNightMode}
                 onSelectRestaurant={setSelectedMapRestaurantId}
               />
             ) : (
@@ -1404,6 +1458,7 @@ function MapScreen({
                 restaurant={selectedMapRestaurant}
                 isFavorite={favoriteIds.includes(selectedMapRestaurant.id)}
                 isDarkMode={isDarkMode}
+                bottomOffset={previewBottomOffset}
                 onOpenDetail={onOpenDetail}
                 onToggleFavorite={onToggleFavorite}
               />
@@ -1420,18 +1475,24 @@ function MapRestaurantPreview({
   restaurant,
   isFavorite,
   isDarkMode,
+  bottomOffset,
   onOpenDetail,
   onToggleFavorite
 }: {
   restaurant: ScoredRestaurant;
   isFavorite: boolean;
   isDarkMode: boolean;
+  bottomOffset: number;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
 }) {
   return (
     <Pressable
-      style={[styles.mapRestaurantPreviewCard, isDarkMode && styles.darkSurfaceRaised]}
+      style={[
+        styles.mapRestaurantPreviewCard,
+        { bottom: bottomOffset },
+        isDarkMode && styles.darkSurfaceRaised
+      ]}
       onPress={() => onOpenDetail(restaurant)}
     >
       <Image source={{ uri: restaurant.photoUrl }} style={styles.mapRestaurantPreviewImage} />
@@ -1502,7 +1563,7 @@ function MapRestaurantPreview({
   );
 }
 
-// Favorites tab sorted by distance from the current user/search location.
+// Onglet favoris trie par distance depuis la position ou la recherche courante.
 function FavoritesScreen({
   favorites,
   isAuthenticated,
@@ -1577,7 +1638,7 @@ function FavoritesScreen({
   );
 }
 
-// Profile tab for account entry points and saved preference settings.
+// Onglet profil pour l'acces au compte et les preferences enregistrees.
 function ProfileScreen({
   criteria,
   favoriteCount,
@@ -1640,11 +1701,11 @@ function ProfileScreen({
         <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
           Préférences
         </Text>
-        <ProfileRow
+        {/* <ProfileRow
           icon={<ShieldCheck size={20} color={colors.success} />}
           label="Mes préférences alimentaires"
           isDarkMode={isDarkMode}
-        />
+        /> */}
         <ProfileRow
           icon={<LocateFixed size={20} color={colors.coral} />}
           label="Localisation et confidentialité"
@@ -1656,16 +1717,16 @@ function ProfileScreen({
         <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
           Paramètres
         </Text>
-        <ProfileRow
+        {/* <ProfileRow
           icon={<Languages size={20} color={colors.blue} />}
           label="Langue"
           isDarkMode={isDarkMode}
-        />
-        <ProfileRow
+        /> */}
+        {/* <ProfileRow
           icon={<UserCog size={20} color={colors.blue} />}
           label="Notifications"
           isDarkMode={isDarkMode}
-        />
+        /> */}
         <ThemeSwitchRow
           isDarkMode={isDarkMode}
           onDarkModeChange={onDarkModeChange}
@@ -1699,7 +1760,7 @@ function ProfileScreen({
   );
 }
 
-// Reusable row used by the profile settings sections.
+// Ligne reutilisable pour les sections de reglages du profil.
 function ProfileRow({
   icon,
   label,
@@ -1727,7 +1788,7 @@ function ProfileRow({
   );
 }
 
-// Switch row dedicated to light/dark appearance in profile settings.
+// Ligne d'interrupteur dediee au theme clair/sombre dans les reglages du profil.
 function ThemeSwitchRow({
   isDarkMode,
   onDarkModeChange
@@ -1755,7 +1816,7 @@ function ThemeSwitchRow({
   );
 }
 
-// Authentication form for the local MVP account flow and social provider entry points.
+// Formulaire d'authentification pour le compte MVP local et les connexions sociales.
 function AuthScreen({
   isDarkMode,
   canSignInWithApple,
@@ -1945,4 +2006,3 @@ function AuthScreen({
     </View>
   );
 }
-

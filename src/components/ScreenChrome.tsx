@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react-native";
 
 import { colors } from "../theme";
 import { styles } from "../styles/appStyles";
-// Generic empty state used by tabs that depend on prior user activity.
+// Etat vide generique pour les onglets qui dependent d'une action utilisateur precedente.
 export function EmptyState({
   icon,
   title,
@@ -32,7 +32,7 @@ export function EmptyState({
   );
 }
 
-// Shared top header for secondary screens.
+// En-tete superieur partage par les ecrans secondaires.
 export function Header({
   title,
   subtitle,

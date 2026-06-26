@@ -10,7 +10,7 @@ import {
 
 import { styles } from "../styles/appStyles";
 import { clamp, formatDecimal, roundToStep } from "../utils/restaurants";
-// Hybrid number control: users can either drag the slider or type a value.
+// Controle numerique hybride : l'utilisateur peut glisser le curseur ou saisir une valeur.
 export function NumberSliderField({
   icon,
   label,
@@ -54,7 +54,7 @@ export function NumberSliderField({
     stepRef.current = step;
   }, [onChange, trackWidth, min, max, step]);
 
-  // Validates typed values and applies the same min/max rules as the slider.
+  // Valide les valeurs saisies et applique les memes bornes min/max que le curseur.
   function commitValue(rawValue: string) {
     const parsed = Number(rawValue.replace(",", "."));
     if (!Number.isFinite(parsed)) {
@@ -66,7 +66,7 @@ export function NumberSliderField({
     onChangeRef.current(Number(nextValue.toFixed(1)));
   }
 
-  // Centralizes slider clamping and rounding so drag and text input behave alike.
+  // Centralise le bornage et l'arrondi pour aligner le glisser et la saisie texte.
   function normalizeValue(rawValue: number) {
     return Number(
       roundToStep(
@@ -76,7 +76,7 @@ export function NumberSliderField({
     );
   }
 
-  // Converts the initial touch position on the track into a filter value.
+  // Convertit la position initiale du toucher sur la piste en valeur de filtre.
   function valueFromPosition(event: GestureResponderEvent) {
     const width = trackWidthRef.current;
     const x = clamp(event.nativeEvent.locationX, 0, width);

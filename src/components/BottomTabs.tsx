@@ -7,14 +7,16 @@ import { styles } from "../styles/appStyles";
 import { clamp } from "../utils/restaurants";
 
 export type MainTab = "search" | "map" | "favorites" | "profile";
-// Bottom navigation between the four main app areas.
+// Navigation basse entre les quatre zones principales de l'app.
 export function BottomTabs({
   activeTab,
   isDarkMode,
+  bottomInset,
   onTabChange
 }: {
   activeTab: MainTab;
   isDarkMode: boolean;
+  bottomInset: number;
   onTabChange: (tab: MainTab) => void;
 }) {
   const activeNavigationColor = isDarkMode ? "#7BE495" : colors.brand;
@@ -213,7 +215,11 @@ export function BottomTabs({
 
   return (
     <View
-      style={[styles.bottomTabs, isDarkMode && styles.darkBottomTabs]}
+      style={[
+        styles.bottomTabs,
+        { bottom: Math.max(12, bottomInset + 8) },
+        isDarkMode && styles.darkBottomTabs
+      ]}
       onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
       {...panResponder.panHandlers}
     >
