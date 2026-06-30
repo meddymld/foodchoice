@@ -47,15 +47,6 @@ export const contextOptions: MealContext[] = [
   "travel"
 ];
 
-export const contextEmojis: Record<MealContext, string> = {
-  quick: "⚡",
-  friends: "🥂",
-  date: "💘",
-  family: "👨‍👩‍👧",
-  solo: "🙋",
-  travel: "🧳"
-};
-
 export const budgetOptions: BudgetLevel[] = [1, 2, 3, 4];
 
 export const defaultCriteria: SearchCriteria = {

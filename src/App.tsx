@@ -30,7 +30,6 @@ import {
   Clock3,
   Compass,
   Heart,
-  Languages,
   Lightbulb,
   LocateFixed,
   Lock,
@@ -48,7 +47,6 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
-  UserCog,
   UserRound
 } from "lucide-react-native";
 
@@ -56,13 +54,15 @@ import { rankRestaurants, scoreRestaurant } from "./domain/scoring";
 import { restaurants as allRestaurants } from "./data/restaurants";
 import {
   budgetOptions,
-  contextEmojis,
   contextOptions,
   cuisineOptions,
   defaultCriteria,
   dietaryOptions
 } from "./constants/search";
+import { contextEmojis } from "./constants/emojis";
 import { MockRestaurantProvider } from "./services/restaurantProvider";
+import { RestaurantSocialLinks } from "./components/RestaurantSocialLinks";
+import { LinkLogo } from "./components/SocialLogos";
 import {
   BudgetLevel,
   DietaryKey,
@@ -588,6 +588,7 @@ function FoodChoiceApp() {
                 favoriteIds={favoriteIds}
                 isDarkMode={isMapNightMode}
                 isNightMode={isMapNightMode}
+                topInset={insets.top}
                 bottomInset={insets.bottom}
                 onOpenDetail={openDetail}
                 onToggleFavorite={toggleFavorite}
@@ -618,9 +619,6 @@ function FoodChoiceApp() {
 
             {activeTab === "profile" && (
               <ProfileScreen
-                criteria={criteria}
-                favoriteCount={account ? favoriteIds.length : 0}
-                resultsCount={results.length}
                 account={account}
                 isDarkMode={isDarkMode}
                 onDarkModeChange={setIsDarkMode}
@@ -1070,16 +1068,19 @@ function DetailScreen({
       <ScrollView contentContainerStyle={styles.detailContent}>
         <Image source={{ uri: restaurant.photoUrl }} style={styles.detailImage} />
         <View style={[styles.detailStats, isDarkMode && styles.darkSurface]}>
-          <Metric
-            icon={<Star size={17} color={colors.gold} fill={colors.gold} />}
-            text={`${restaurant.rating} (${restaurant.reviewCount})`}
-            isDarkMode={isDarkMode}
-          />
-          <Metric
-            icon={<MapPin size={17} color={colors.coral} />}
-            text={`${restaurant.distanceKm.toFixed(1)} km`}
-            isDarkMode={isDarkMode}
-          />
+          <View style={styles.detailMetricGroup}>
+            <Metric
+              icon={<Star size={17} color={colors.gold} fill={colors.gold} />}
+              text={`${restaurant.rating} (${restaurant.reviewCount})`}
+              isDarkMode={isDarkMode}
+            />
+            <Metric
+              icon={<MapPin size={17} color={colors.coral} />}
+              text={`${restaurant.distanceKm.toFixed(1)} km`}
+              isDarkMode={isDarkMode}
+            />
+          </View>
+          <RestaurantSocialLinks restaurant={restaurant} onOpenUrl={openWebsite} />
         </View>
 
         <View style={styles.hoursBlock}>
@@ -1228,6 +1229,7 @@ function DetailScreen({
               style={styles.websiteLink}
               onPress={() => openWebsite(restaurant.website!)}
             >
+              <LinkLogo />
               <Text style={styles.linkText}>{restaurant.website}</Text>
             </Pressable>
           )}
@@ -1268,6 +1270,7 @@ function MapScreen({
   favoriteIds,
   isDarkMode,
   isNightMode,
+  topInset,
   bottomInset,
   onOpenDetail,
   onToggleFavorite,
@@ -1278,6 +1281,7 @@ function MapScreen({
   favoriteIds: string[];
   isDarkMode: boolean;
   isNightMode: boolean;
+  topInset: number;
   bottomInset: number;
   onOpenDetail: (restaurant: ScoredRestaurant) => void;
   onToggleFavorite: (restaurantId: string) => void;
@@ -1293,6 +1297,13 @@ function MapScreen({
   const hasNativeMap = supportsNativeRestaurantMap;
   const bottomNavigationOffset = Math.max(12, bottomInset + 8);
   const previewBottomOffset = bottomNavigationOffset + 84;
+  const mapBottomPadding = bottomNavigationOffset + 108;
+  const mapControlPadding = {
+    top: Math.max(20, topInset + 12),
+    right: 16,
+    bottom: mapBottomPadding,
+    left: 16
+  };
 
   // Calcule les bornes geographiques des resultats pour centrer la carte native.
   const mapBounds = useMemo(() => {
@@ -1369,7 +1380,7 @@ function MapScreen({
   return (
     <View style={[styles.flex, isDarkMode && styles.darkFlex]}>
       {results.length === 0 && (
-        <View style={styles.tabHeader}>
+        <View style={[styles.tabHeader, { paddingTop: topInset + 18 }]}>
           <Text style={[styles.tabTitle, isDarkMode && styles.darkText]}>Carte</Text>
           <Text style={[styles.tabSubtitle, isDarkMode && styles.darkMutedText]}>
             Lancez une recherche pour remplir la carte.
@@ -1401,6 +1412,7 @@ function MapScreen({
                 selectedRestaurantId={selectedMapRestaurant?.id}
                 initialRegion={nativeMapRegion}
                 isNightMode={isNightMode}
+                mapPadding={mapControlPadding}
                 onSelectRestaurant={setSelectedMapRestaurantId}
               />
             ) : (
@@ -1640,9 +1652,6 @@ function FavoritesScreen({
 
 // Onglet profil pour l'acces au compte et les preferences enregistrees.
 function ProfileScreen({
-  criteria,
-  favoriteCount,
-  resultsCount,
   account,
   isDarkMode,
   onDarkModeChange,
@@ -1652,9 +1661,6 @@ function ProfileScreen({
   onInviteFriend,
   onRateFoodChoice
 }: {
-  criteria: SearchCriteria;
-  favoriteCount: number;
-  resultsCount: number;
   account: Account | null;
   isDarkMode: boolean;
   onDarkModeChange: (enabled: boolean) => void;
@@ -1701,11 +1707,6 @@ function ProfileScreen({
         <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
           Préférences
         </Text>
-        {/* <ProfileRow
-          icon={<ShieldCheck size={20} color={colors.success} />}
-          label="Mes préférences alimentaires"
-          isDarkMode={isDarkMode}
-        /> */}
         <ProfileRow
           icon={<LocateFixed size={20} color={colors.coral} />}
           label="Localisation et confidentialité"
@@ -1717,16 +1718,6 @@ function ProfileScreen({
         <Text style={[styles.profileSectionTitle, isDarkMode && styles.darkText]}>
           Paramètres
         </Text>
-        {/* <ProfileRow
-          icon={<Languages size={20} color={colors.blue} />}
-          label="Langue"
-          isDarkMode={isDarkMode}
-        /> */}
-        {/* <ProfileRow
-          icon={<UserCog size={20} color={colors.blue} />}
-          label="Notifications"
-          isDarkMode={isDarkMode}
-        /> */}
         <ThemeSwitchRow
           isDarkMode={isDarkMode}
           onDarkModeChange={onDarkModeChange}
@@ -1802,7 +1793,7 @@ function ThemeSwitchRow({
         <Moon size={20} color={isDarkMode ? colors.gold : colors.blue} />
       </View>
       <View style={styles.themeSwitchCopy}>
-        <Text style={[styles.profileRowText, isDarkMode && styles.darkText]}>
+        <Text style={[styles.themeSwitchText, isDarkMode && styles.darkText]}>
           Mode sombre
         </Text>
       </View>

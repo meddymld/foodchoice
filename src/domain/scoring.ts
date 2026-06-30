@@ -5,23 +5,16 @@ import {
   SearchCriteria
 } from "../types";
 import { budgetLabels, contextLabels, dietaryLabels } from "../theme";
+import { normalizeLabel } from "../utils/restaurants";
 
 const confirmedDietScore = 14;
 const unknownDietScore = 3;
 
-function normalizeText(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
 function cuisineMatches(restaurant: Restaurant, cuisine: string) {
-  const normalizedCuisine = normalizeText(cuisine);
+  const normalizedCuisine = normalizeLabel(cuisine);
 
   return restaurant.cuisines.some(
-    (item) => normalizeText(item) === normalizedCuisine
+    (item) => normalizeLabel(item) === normalizedCuisine
   );
 }
 
@@ -39,7 +32,7 @@ function dietaryMatches(restaurant: Restaurant, criteria: SearchCriteria) {
   return criteria.dietary.every((diet) => restaurant.dietary[diet] === "confirmed");
 }
 
-export function matchesSearchCriteria(
+function matchesSearchCriteria(
   restaurant: Restaurant,
   criteria: SearchCriteria
 ) {

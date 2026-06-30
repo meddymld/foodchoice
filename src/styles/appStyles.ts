@@ -693,13 +693,33 @@ export const styles = StyleSheet.create({
   },
   detailStats: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 14,
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
     backgroundColor: colors.surface,
     borderRadius: radii.md,
     padding: 14,
     borderWidth: 1,
     borderColor: colors.line
+  },
+  detailMetricGroup: {
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 14
+  },
+  detailSocialLinks: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10
+  },
+  detailSocialButton: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center"
   },
   detailBlock: {
     backgroundColor: colors.surface,
@@ -728,6 +748,9 @@ export const styles = StyleSheet.create({
   },
   websiteLink: {
     alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
     paddingVertical: 6
   },
   phoneLink: {
@@ -1575,6 +1598,11 @@ export const styles = StyleSheet.create({
   themeSwitchCopy: {
     flex: 1,
     gap: 2
+  },
+  themeSwitchText: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800"
   },
   themeSwitchHint: {
     color: colors.muted,

@@ -30,7 +30,9 @@ export const restaurants: Restaurant[] = [
       "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=900&q=80",
     phone: "+33100000001",
     website: "https://example.com/green-bowl",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "mama-trattoria",
@@ -90,7 +92,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=900&q=80",
     website: "https://example.com/tokyo-ramen",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "le-jardin-familial",
@@ -150,7 +154,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1542528180-a1208c5169a5?auto=format&fit=crop&w=900&q=80",
     website: "https://example.com/beirut-table",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "noche-tacos",
@@ -210,7 +216,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1585937421612-70a008356fbe?auto=format&fit=crop&w=900&q=80",
     website: "https://example.com/saffron-house",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "luna-date",
@@ -272,7 +280,9 @@ export const restaurants: Restaurant[] = [
       "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=900&q=80",
     phone: "+33561000001",
     website: "https://example.com/cassoulet-club",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "toulouse-vegan-garonne",
@@ -303,7 +313,9 @@ export const restaurants: Restaurant[] = [
       "https://images.unsplash.com/photo-1543339308-43e59d6b73a6?auto=format&fit=crop&w=900&q=80",
     phone: "+33561000002",
     website: "https://example.com/vegan-garonne",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je",
   },
   {
     id: "toulouse-halal-grill",
@@ -333,7 +345,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1550547660-d9450f859349?auto=format&fit=crop&w=900&q=80",
     phone: "+33561000003",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "toulouse-sakura-midi",
@@ -394,7 +408,8 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&w=900&q=80",
     phone: "+33561000005",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/"
   },
   {
     id: "marseille-vieux-port-sea",
@@ -455,7 +470,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1600891964599-f61ba0e24092?auto=format&fit=crop&w=900&q=80",
     phone: "+33491000002",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "marseille-pizza-panier",
@@ -516,7 +533,9 @@ export const restaurants: Restaurant[] = [
     photoUrl:
       "https://images.unsplash.com/photo-1490645935967-10de6ba17061?auto=format&fit=crop&w=900&q=80",
     phone: "+33491000004",
-    source: "mock"
+    source: "mock",
+    instagram: "https://www.instagram.com/meddy_mld/",
+    tikTok: "https://www.tiktok.com/@fadyapp?_r=1&_t=ZN-97e06eIk9Je"
   },
   {
     id: "marseille-kosher-corniche",

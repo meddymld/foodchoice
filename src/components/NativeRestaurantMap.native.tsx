@@ -3,15 +3,8 @@ import { Text, View } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 
 import { colors } from "../theme";
-import { ScoredRestaurant } from "../types";
 import { styles } from "../styles/appStyles";
-
-type NativeMapRegion = {
-  latitude: number;
-  longitude: number;
-  latitudeDelta: number;
-  longitudeDelta: number;
-};
+import { NativeRestaurantMapProps } from "./NativeRestaurantMap.types";
 
 const googleMapsNightStyle = [
   { elementType: "geometry", stylers: [{ color: "#1D2C3A" }] },
@@ -84,20 +77,17 @@ export function NativeRestaurantMap({
   selectedRestaurantId,
   initialRegion,
   isNightMode,
+  mapPadding,
   onSelectRestaurant
-}: {
-  restaurants: ScoredRestaurant[];
-  selectedRestaurantId?: string;
-  initialRegion: NativeMapRegion;
-  isNightMode: boolean;
-  onSelectRestaurant: (restaurantId: string) => void;
-}) {
+}: NativeRestaurantMapProps) {
   return (
     <MapView
       style={styles.nativeMap}
       provider={PROVIDER_GOOGLE}
       initialRegion={initialRegion}
       customMapStyle={isNightMode ? googleMapsNightStyle : []}
+      mapPadding={mapPadding}
+      legalLabelInsets={mapPadding}
       showsUserLocation
       showsMyLocationButton
     >

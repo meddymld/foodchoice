@@ -67,6 +67,8 @@ export type Restaurant = {
   photoUrl: string;
   phone?: string;
   website?: string;
+  instagram?: string;
+  tikTok?: string;
   source: "mock" | "googlePlaces";
 };
 
