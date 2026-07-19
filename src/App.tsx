@@ -1,6 +1,6 @@
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   ActionSheetIOS,
@@ -104,9 +104,25 @@ import {
 
 const provider = new MockRestaurantProvider();
 
-function isNightTime(date = new Date()) {
-  const hour = date.getHours();
-  return hour >= 20 || hour < 7;
+function compactAddressParts(parts: Array<string | null | undefined>) {
+  return parts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+}
+
+// Construit une adresse lisible depuis le reverse geocoding du telephone.
+function formatCurrentAddress(address: Location.LocationGeocodedAddress) {
+  const streetLine = compactAddressParts([
+    address.streetNumber,
+    address.street ?? address.name
+  ]).join(" ");
+  const cityLine = compactAddressParts([
+    address.postalCode,
+    address.city ?? address.district ?? address.subregion
+  ]).join(" ");
+  const fallbackLine = address.region ?? address.country;
+
+  return compactAddressParts([streetLine, cityLine, fallbackLine]).join(", ");
 }
 
 type Screen = "search" | "results" | "detail" | "auth";
@@ -143,18 +159,8 @@ function FoodChoiceApp() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
-  const [isMapNightMode, setIsMapNightMode] = useState(() => isNightTime());
   const canSignInWithApple = Platform.OS === "ios" && !Platform.isPad;
-  const isMapTab = screen !== "detail" && screen !== "auth" && activeTab === "map";
-  const chromeDarkMode = isMapTab ? isMapNightMode : isDarkMode;
-
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      setIsMapNightMode(isNightTime());
-    }, 60000);
-
-    return () => clearInterval(intervalId);
-  }, []);
+  const chromeDarkMode = isDarkMode;
 
   // Meilleur resultat utilise par le mode recommandation.
   const topPick = useMemo(() => results[0], [results]);
@@ -237,9 +243,22 @@ function FoodChoiceApp() {
       }
 
       const location = await Location.getCurrentPositionAsync({});
+      const [currentAddress] = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      });
+      const locationLabel = currentAddress ? formatCurrentAddress(currentAddress) : "";
+      if (!locationLabel) {
+        Alert.alert(
+          "Adresse introuvable",
+          "Votre position est detectee, mais le telephone ne renvoie pas encore d'adresse."
+        );
+        return null;
+      }
+
       return {
         ...baseCriteria,
-        locationLabel: "Position actuelle",
+        locationLabel,
         coordinates: {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude
@@ -256,17 +275,12 @@ function FoodChoiceApp() {
     }
   }
 
-  // Dans le prototype, le raccourci de position actuelle utilise une adresse de
-  // test fixe pour verifier les donnees de Toulouse sans GPS reel.
-  function useCurrentLocation() {
-    setCriteria((current) => ({
-      ...current,
-      locationLabel: "Toulouse",
-      coordinates: {
-        latitude: 43.6047,
-        longitude: 1.4442
-      }
-    }));
+  // Le raccourci "ma position" demande le GPS et remplace toute ville saisie.
+  async function useCurrentLocation() {
+    const resolvedCriteria = await resolveCriteriaLocation(criteria, true);
+    if (!resolvedCriteria) return;
+
+    setCriteria(resolvedCriteria);
     setSearchError(null);
   }
 
@@ -586,8 +600,8 @@ function FoodChoiceApp() {
                 criteria={criteria}
                 results={results}
                 favoriteIds={favoriteIds}
-                isDarkMode={isMapNightMode}
-                isNightMode={isMapNightMode}
+                isDarkMode={isDarkMode}
+                isNightMode={isDarkMode}
                 topInset={insets.top}
                 bottomInset={insets.bottom}
                 onOpenDetail={openDetail}
@@ -633,7 +647,7 @@ function FoodChoiceApp() {
 
           <BottomTabs
             activeTab={activeTab}
-            isDarkMode={activeTab === "map" ? isMapNightMode : isDarkMode}
+            isDarkMode={isDarkMode}
             bottomInset={insets.bottom}
             onTabChange={(tab) => setActiveTab(tab)}
           />
@@ -716,14 +730,14 @@ function SearchScreen({
           <Compass size={24} color={colors.surface} strokeWidth={2.4} />
         </View>
         <View>
-          <Text style={[styles.brand, isDarkMode && styles.darkText]}>foodchoice</Text>
-          <Text style={[styles.tagline, isDarkMode && styles.darkMutedText]}>
+          <Text style={[styles.brand, styles.brandOnHero]}>foodchoice</Text>
+          <Text style={[styles.tagline, styles.taglineOnHero]}>
             Trouver où manger, sans débat.
           </Text>
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, isDarkMode && styles.darkSurfaceRaised]}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>
           Point de départ
         </Text>
@@ -753,7 +767,7 @@ function SearchScreen({
         </Pressable>
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, isDarkMode && styles.darkSurfaceRaised]}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Contexte</Text>
         <View style={styles.gridChips}>
           {contextOptions.map((context) => (
@@ -768,7 +782,7 @@ function SearchScreen({
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, isDarkMode && styles.darkSurfaceRaised]}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Budget</Text>
         <View style={styles.gridChips}>
           {budgetOptions.map((budget) => (
@@ -783,7 +797,7 @@ function SearchScreen({
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, isDarkMode && styles.darkSurfaceRaised]}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>Type de cuisine</Text>
         <View style={styles.gridChips}>
           {cuisineOptions.map((cuisine) => (
@@ -798,7 +812,7 @@ function SearchScreen({
         </View>
       </View>
 
-      <View style={styles.section}>
+      <View style={[styles.section, isDarkMode && styles.darkSurfaceRaised]}>
         <Text style={[styles.sectionTitle, isDarkMode && styles.darkText]}>
           Contraintes alimentaires
         </Text>
@@ -985,6 +999,18 @@ function ResultsScreen({
   );
 }
 
+// Affiche un libelle court et lisible pour un lien de site web.
+function getWebsiteTitle(websiteUrl: string) {
+  try {
+    const normalizedUrl = websiteUrl.startsWith("http")
+      ? websiteUrl
+      : `https://${websiteUrl}`;
+    return new URL(normalizedUrl).hostname.replace(/^www\./, "");
+  } catch {
+    return websiteUrl.replace(/^https?:\/\//, "").replace(/^www\./, "");
+  }
+}
+
 // Fiche restaurant avec actions de contact, informations repas et itineraire.
 function DetailScreen({
   restaurant,
@@ -1022,6 +1048,12 @@ function DetailScreen({
       : restaurant.cuisines;
   const weeklyOpeningHours = getWeeklyOpeningHours(restaurant);
   const currentWeekday = getCurrentFrenchWeekday();
+  const openingStatus = restaurant.openNow
+    ? `Ouvert jusqu'à ${restaurant.closesAt}`
+    : "Fermé maintenant";
+  const websiteTitle = restaurant.website
+    ? getWebsiteTitle(restaurant.website)
+    : undefined;
 
   // Ouvre l'app telephone native avec le numero du restaurant.
   async function callRestaurant(phoneNumber: string) {
@@ -1066,22 +1098,135 @@ function DetailScreen({
         onBack={onBack}
       />
       <ScrollView contentContainerStyle={styles.detailContent}>
-        <Image source={{ uri: restaurant.photoUrl }} style={styles.detailImage} />
-        <View style={[styles.detailStats, isDarkMode && styles.darkSurface]}>
+        <View style={styles.detailHero}>
+          <Image source={{ uri: restaurant.photoUrl }} style={styles.detailHeroImage} />
+          <View style={styles.detailHeroOverlay}>
+            <View
+              style={[
+                styles.detailHeroStatus,
+                restaurant.openNow ? styles.detailHeroStatusOpen : styles.detailHeroStatusClosed
+              ]}
+            >
+              <Text
+                style={[
+                  styles.detailHeroStatusText,
+                  restaurant.openNow && styles.detailHeroStatusTextOpen
+                ]}
+              >
+                {openingStatus}
+              </Text>
+            </View>
+            <Text style={styles.detailHeroMeta} numberOfLines={1}>
+              {budgetLabels[restaurant.budget]} · {restaurant.pricePerPerson}
+            </Text>
+          </View>
+        </View>
+
+        <View style={[styles.detailInfoCard, isDarkMode && styles.darkSurface]}>
+          <View style={styles.detailIntroHeader}>
+            <View style={styles.detailIntroCopy}>
+              <Text
+                numberOfLines={2}
+                style={[styles.detailIntroName, isDarkMode && styles.darkText]}
+              >
+                {restaurant.name}
+              </Text>
+              <Text
+                numberOfLines={2}
+                style={[styles.detailIntroMeta, isDarkMode && styles.darkMutedText]}
+              >
+                {restaurant.cuisines.slice(0, 2).join(", ")} · {budgetLabels[restaurant.budget]} ·{" "}
+                {restaurant.pricePerPerson}
+              </Text>
+            </View>
+            <RestaurantSocialLinks restaurant={restaurant} onOpenUrl={openWebsite} />
+          </View>
+
+          <View style={styles.detailTagWrap}>
+            {matchedCuisineCriteria.slice(0, 3).map((cuisine) => (
+              <View
+                key={cuisine}
+                style={[
+                  styles.criteriaPill,
+                  isDarkMode && styles.darkCriteriaPill
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.criteriaPillText,
+                    isDarkMode && styles.darkCriteriaPillText
+                  ]}
+                >
+                  {cuisine}
+                </Text>
+              </View>
+            ))}
+            {confirmedDiet.slice(0, 2).map(([diet]) => (
+              <View key={diet} style={[styles.dietConfirmed, isDarkMode && styles.darkPanel]}>
+                <ShieldCheck size={14} color={colors.success} />
+                <Text style={styles.dietConfirmedText}>{dietaryLabels[diet]}</Text>
+              </View>
+            ))}
+          </View>
+
           <View style={styles.detailMetricGroup}>
             <Metric
-              icon={<Star size={17} color={colors.gold} fill={colors.gold} />}
+              icon={<Star size={16} color={colors.gold} fill={colors.gold} />}
               text={`${restaurant.rating} (${restaurant.reviewCount})`}
               isDarkMode={isDarkMode}
             />
             <Metric
-              icon={<MapPin size={17} color={colors.coral} />}
+              icon={<MapPin size={16} color={colors.coral} />}
               text={`${restaurant.distanceKm.toFixed(1)} km`}
               isDarkMode={isDarkMode}
             />
+            {restaurant.matchReasons.slice(0, 2).map((reason) => (
+              <View key={reason} style={[styles.reasonPill, isDarkMode && styles.darkPanel]}>
+                <Check size={13} color={colors.brand} />
+                <Text style={[styles.reasonText, isDarkMode && styles.darkReasonText]}>
+                  {reason}
+                </Text>
+              </View>
+            ))}
           </View>
-          <RestaurantSocialLinks restaurant={restaurant} onOpenUrl={openWebsite} />
-        </View>
+
+          <View style={styles.detailInfoDivider} />
+
+          <View style={styles.detailInfoRow}>
+            <Map size={19} color={colors.coral} />
+            <Text
+              numberOfLines={2}
+              style={[styles.detailInfoText, isDarkMode && styles.darkText]}
+            >
+              {restaurant.address}
+            </Text>
+          </View>
+
+          {(restaurant.phone || restaurant.website) && (
+            <View style={styles.detailContactRow}>
+              {restaurant.phone && (
+                <Pressable
+                  style={styles.compactContactLink}
+                  onPress={() => callRestaurant(restaurant.phone!)}
+                >
+                  <Phone size={16} color={colors.blue} />
+                  <Text style={styles.compactContactText}>{restaurant.phone}</Text>
+                </Pressable>
+              )}
+              {restaurant.website && (
+                <Pressable
+                  style={styles.compactContactLink}
+                  onPress={() => openWebsite(restaurant.website!)}
+                >
+                  <LinkLogo size={16} />
+                  <Text style={styles.compactContactText} numberOfLines={1}>
+                    {websiteTitle}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          )}
+          </View>
 
         <View style={styles.hoursBlock}>
           <View style={styles.hoursHeader}>
@@ -1137,63 +1282,6 @@ function DetailScreen({
           </ScrollView>
         </View>
 
-        <TouchableOpacity
-          style={[styles.addressAction, isDarkMode && styles.darkSurfaceRaised]}
-          onPress={onOpenRoute}
-          activeOpacity={0.72}
-        >
-          <Map size={22} color={colors.coral} />
-          <Text
-            numberOfLines={2}
-            style={[styles.addressActionText, isDarkMode && styles.darkText]}
-          >
-            {restaurant.address}
-          </Text>
-          <ChevronRight size={20} color={isDarkMode ? "#AEB9AD" : colors.muted} />
-        </TouchableOpacity>
-
-        <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
-          <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>
-            Cuisine et budget
-          </Text>
-          <Text style={[styles.detailText, isDarkMode && styles.darkMutedText]}>
-            {restaurant.cuisines.join(", ")} · {budgetLabels[restaurant.budget]} ·{" "}
-            {restaurant.pricePerPerson}
-          </Text>
-          <View style={styles.criteriaBlock}>
-            <View style={styles.reasonWrap}>
-              {matchedCuisineCriteria.map((cuisine) => (
-                <View
-                  key={cuisine}
-                  style={[
-                    styles.criteriaPill,
-                    isDarkMode && styles.darkCriteriaPill
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.criteriaPillText,
-                      isDarkMode && styles.darkCriteriaPillText
-                    ]}
-                  >
-                    {cuisine}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          </View>
-          <View style={styles.reasonWrap}>
-            {restaurant.matchReasons.map((reason) => (
-              <View key={reason} style={[styles.reasonPill, isDarkMode && styles.darkPanel]}>
-                <Check size={13} color={colors.brand} />
-                <Text style={[styles.reasonText, isDarkMode && styles.darkReasonText]}>
-                  {reason}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
         <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
           <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>
             Informations alimentaires
@@ -1213,27 +1301,6 @@ function DetailScreen({
           </View>
         </View>
 
-        <View style={[styles.detailBlock, isDarkMode && styles.darkSurfaceRaised]}>
-          <Text style={[styles.detailTitle, isDarkMode && styles.darkText]}>Contact</Text>
-          {restaurant.phone && (
-            <Pressable
-              style={styles.phoneLink}
-              onPress={() => callRestaurant(restaurant.phone!)}
-            >
-              <Phone size={17} color={colors.blue} />
-              <Text style={styles.phoneLinkText}>{restaurant.phone}</Text>
-            </Pressable>
-          )}
-          {restaurant.website && (
-            <Pressable
-              style={styles.websiteLink}
-              onPress={() => openWebsite(restaurant.website!)}
-            >
-              <LinkLogo />
-              <Text style={styles.linkText}>{restaurant.website}</Text>
-            </Pressable>
-          )}
-        </View>
       </ScrollView>
 
       <View style={[styles.bottomBar, isDarkMode && styles.darkBottomBar]}>
@@ -1564,7 +1631,7 @@ function MapRestaurantPreview({
 
         <View style={styles.mapRestaurantPreviewTags}>
           <Text style={[styles.mapRestaurantPreviewTag, isDarkMode && styles.darkCompactReason]}>
-            {restaurant.openNow ? "Ouvert maintenant" : "Ferme maintenant"}
+            {restaurant.openNow ? "Ouvert maintenant" : "Fermé maintenant"}
           </Text>
           <Text style={[styles.mapRestaurantPreviewTag, isDarkMode && styles.darkCompactReason]}>
             {restaurant.distanceKm <= 1 ? "Proche" : `${restaurant.distanceKm.toFixed(1)} km`}
@@ -1797,12 +1864,15 @@ function ThemeSwitchRow({
           Mode sombre
         </Text>
       </View>
-      <Switch
-        value={isDarkMode}
-        onValueChange={onDarkModeChange}
-        trackColor={{ false: colors.line, true: colors.brand }}
-        thumbColor={colors.surface}
-      />
+      <View style={styles.themeSwitchControl}>
+        <Switch
+          style={styles.themeSwitch}
+          value={isDarkMode}
+          onValueChange={onDarkModeChange}
+          trackColor={{ false: colors.line, true: colors.brand }}
+          thumbColor={colors.surface}
+        />
+      </View>
     </View>
   );
 }

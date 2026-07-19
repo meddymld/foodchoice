@@ -1,6 +1,6 @@
 import { restaurants } from "../data/restaurants";
 import { Restaurant, SearchCriteria } from "../types";
-import { normalizeLabel } from "../utils/restaurants";
+import { calculateDistanceKm, normalizeLabel } from "../utils/restaurants";
 
 interface RestaurantProvider {
   /** Recherche des restaurants correspondant aux criteres fournis. */
@@ -23,7 +23,9 @@ export class MockRestaurantProvider implements RestaurantProvider {
 
     return cityRestaurants.map((restaurant) => ({
       ...restaurant,
-      distanceKm: Math.max(0.3, restaurant.distanceKm)
+      distanceKm: criteria.coordinates
+        ? calculateDistanceKm(criteria.coordinates, restaurant.coordinates)
+        : Math.max(0.3, restaurant.distanceKm)
     }));
   }
 }
